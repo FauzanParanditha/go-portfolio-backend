@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS contacts;
+DROP TABLE IF EXISTS experiences;
+DROP TABLE IF EXISTS projects;
+DROP EXTENSION IF EXISTS "uuid-ossp";
