@@ -1,0 +1,906 @@
+basePath: /api/v1
+definitions:
+  handlers.ContactCreateRequest:
+    properties:
+      email:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+      subject:
+        type: string
+    required:
+    - email
+    - message
+    - name
+    - subject
+    type: object
+  handlers.ContactMessageResponse:
+    properties:
+      createdAt:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      isRead:
+        type: boolean
+      message:
+        type: string
+      name:
+        type: string
+      subject:
+        type: string
+    type: object
+  handlers.ErrorResponse:
+    properties:
+      error:
+        properties:
+          code:
+            type: string
+          details:
+            additionalProperties:
+              type: string
+            type: object
+          message:
+            type: string
+        type: object
+      requestId:
+        type: string
+    type: object
+  handlers.ExperienceCreateRequest:
+    properties:
+      company:
+        type: string
+      description:
+        type: string
+      endDate:
+        description: nullable
+        type: string
+      highlights:
+        description: teks bullet
+        items:
+          type: string
+        type: array
+      isCurrent:
+        type: boolean
+      location:
+        type: string
+      sortOrder:
+        type: integer
+      startDate:
+        description: '"2006-01-02"'
+        type: string
+      tagIds:
+        description: UUID string
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    required:
+    - company
+    - startDate
+    - title
+    type: object
+  handlers.ExperienceHighlightResponse:
+    properties:
+      text:
+        type: string
+    type: object
+  handlers.ExperienceResponse:
+    properties:
+      company:
+        type: string
+      description:
+        type: string
+      endDate:
+        description: nullable
+        type: string
+      highlights:
+        items:
+          $ref: '#/definitions/handlers.ExperienceHighlightResponse'
+        type: array
+      id:
+        type: string
+      isCurrent:
+        type: boolean
+      location:
+        type: string
+      sortOrder:
+        type: integer
+      startDate:
+        description: '"2006-01-02"'
+        type: string
+      tags:
+        items:
+          $ref: '#/definitions/handlers.TagResponse'
+        type: array
+      title:
+        type: string
+    type: object
+  handlers.ExperienceUpdateRequest:
+    properties:
+      company:
+        type: string
+      description:
+        type: string
+      endDate:
+        description: nullable
+        type: string
+      highlights:
+        description: teks bullet
+        items:
+          type: string
+        type: array
+      isCurrent:
+        type: boolean
+      location:
+        type: string
+      sortOrder:
+        type: integer
+      startDate:
+        description: '"2006-01-02"'
+        type: string
+      tagIds:
+        description: UUID string
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    required:
+    - company
+    - startDate
+    - title
+    type: object
+  handlers.LoginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  handlers.LoginResponse:
+    properties:
+      expiresIn:
+        description: detik
+        type: integer
+      token:
+        type: string
+      tokenType:
+        type: string
+    type: object
+  handlers.ProjectCreateRequest:
+    properties:
+      coverImageUrl:
+        type: string
+      features:
+        description: list text bullet
+        items:
+          type: string
+        type: array
+      isFeatured:
+        type: boolean
+      liveUrl:
+        type: string
+      shortDesc:
+        type: string
+      slug:
+        type: string
+      sortOrder:
+        type: integer
+      sourceUrl:
+        type: string
+      tagIds:
+        description: list UUID string
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    required:
+    - coverImageUrl
+    - shortDesc
+    - slug
+    - title
+    type: object
+  handlers.ProjectFeatureResponse:
+    properties:
+      text:
+        type: string
+    type: object
+  handlers.ProjectResponse:
+    properties:
+      coverImageUrl:
+        type: string
+      features:
+        items:
+          $ref: '#/definitions/handlers.ProjectFeatureResponse'
+        type: array
+      id:
+        type: string
+      isFeatured:
+        type: boolean
+      liveUrl:
+        type: string
+      shortDesc:
+        type: string
+      slug:
+        type: string
+      sourceUrl:
+        type: string
+      tags:
+        items:
+          $ref: '#/definitions/handlers.TagResponse'
+        type: array
+      title:
+        type: string
+    type: object
+  handlers.ProjectUpdateRequest:
+    properties:
+      coverImageUrl:
+        type: string
+      features:
+        description: list text bullet
+        items:
+          type: string
+        type: array
+      isFeatured:
+        type: boolean
+      liveUrl:
+        type: string
+      shortDesc:
+        type: string
+      slug:
+        type: string
+      sortOrder:
+        type: integer
+      sourceUrl:
+        type: string
+      tagIds:
+        description: list UUID string
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    required:
+    - coverImageUrl
+    - shortDesc
+    - slug
+    - title
+    type: object
+  handlers.ProjectsListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.ProjectResponse'
+        type: array
+      meta: {}
+    type: object
+  handlers.TagCreateRequest:
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+    required:
+    - name
+    - type
+    type: object
+  handlers.TagResponse:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      type:
+        type: string
+    type: object
+  handlers.TagUpdateRequest:
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+    required:
+    - name
+    - type
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: fauzan@pandi.id
+    name: Fauzan
+  description: API untuk personal portfolio (projects, experiences, contact, dll).
+  title: Portfolio Backend API
+  version: "1.0"
+paths:
+  /admin/contact-messages:
+    get:
+      parameters:
+      - description: Search
+        in: query
+        name: q
+        type: string
+      - description: Filter read/unread
+        in: query
+        name: isRead
+        type: boolean
+      - description: Page
+        in: query
+        name: page
+        type: integer
+      - description: Limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.ContactMessageResponse'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: View inbox messages
+      tags:
+      - admin-contact
+  /admin/contact-messages/{id}:
+    delete:
+      parameters:
+      - description: Message ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      summary: Delete message
+      tags:
+      - admin-contact
+    get:
+      parameters:
+      - description: Message ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ContactMessageResponse'
+      security:
+      - BearerAuth: []
+      summary: Get message detail
+      tags:
+      - admin-contact
+  /admin/contact-messages/{id}/read:
+    patch:
+      parameters:
+      - description: Message ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: isRead flag
+        in: body
+        name: payload
+        required: true
+        schema:
+          additionalProperties:
+            type: boolean
+          type: object
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      summary: Mark contact message read/unread
+      tags:
+      - admin-contact
+  /admin/experiences:
+    get:
+      parameters:
+      - description: Search
+        in: query
+        name: q
+        type: string
+      - description: Page
+        in: query
+        name: page
+        type: integer
+      - description: Limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.ExperienceResponse'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List all experiences
+      tags:
+      - admin-experiences
+    post:
+      parameters:
+      - description: Experience payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ExperienceCreateRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.ExperienceResponse'
+      security:
+      - BearerAuth: []
+      summary: Create new experience
+      tags:
+      - admin-experiences
+  /admin/experiences/{id}:
+    delete:
+      parameters:
+      - description: Experience ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      summary: Delete experience
+      tags:
+      - admin-experiences
+    get:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ExperienceResponse'
+      security:
+      - BearerAuth: []
+      summary: Get experience detail
+      tags:
+      - admin-experiences
+    put:
+      parameters:
+      - description: Experience ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Update payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ExperienceUpdateRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ExperienceResponse'
+      security:
+      - BearerAuth: []
+      summary: Update experience
+      tags:
+      - admin-experiences
+  /admin/projects:
+    get:
+      consumes:
+      - application/json
+      description: Admin-only list with search, pagination, featured filter
+      parameters:
+      - description: Search keyword
+        in: query
+        name: q
+        type: string
+      - description: Filter featured
+        in: query
+        name: featured
+        type: boolean
+      - description: Page
+        in: query
+        name: page
+        type: integer
+      - description: Limit
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProjectsListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List all projects (admin)
+      tags:
+      - admin-projects
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ProjectCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.ProjectResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create new project
+      tags:
+      - admin-projects
+  /admin/projects/{id}:
+    delete:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete project
+      tags:
+      - admin-projects
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProjectResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get project by ID
+      tags:
+      - admin-projects
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Update payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ProjectUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProjectResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update project by ID
+      tags:
+      - admin-projects
+  /admin/tags:
+    get:
+      parameters:
+      - description: Search
+        in: query
+        name: q
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.TagResponse'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List tags
+      tags:
+      - admin-tags
+    post:
+      parameters:
+      - description: Tag payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.TagCreateRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.TagResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create new tag
+      tags:
+      - admin-tags
+  /admin/tags/{id}:
+    delete:
+      parameters:
+      - description: Tag ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      summary: Delete tag
+      tags:
+      - admin-tags
+    get:
+      parameters:
+      - description: Tag ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TagResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get single tag
+      tags:
+      - admin-tags
+    put:
+      parameters:
+      - description: Tag ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Tag payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.TagUpdateRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TagResponse'
+      security:
+      - BearerAuth: []
+      summary: Update tag
+      tags:
+      - admin-tags
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate admin and return JWT token
+      parameters:
+      - description: Login data
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Login admin
+      tags:
+      - auth
+  /contact:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Contact form
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ContactCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Submit contact message
+      tags:
+      - contact
+  /experiences:
+    get:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.ExperienceResponse'
+            type: array
+      summary: Get experiences
+      tags:
+      - experiences
+  /projects:
+    get:
+      consumes:
+      - application/json
+      description: List projects visible publicly with search & pagination
+      parameters:
+      - description: Search keyword
+        in: query
+        name: q
+        type: string
+      - description: Filter featured
+        in: query
+        name: featured
+        type: boolean
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProjectsListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get public projects
+      tags:
+      - projects
+  /projects/{slug}:
+    get:
+      consumes:
+      - application/json
+      description: Get single public project by slug
+      parameters:
+      - description: Project slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProjectResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get project detail
+      tags:
+      - projects
+schemes:
+- http
+swagger: "2.0"
