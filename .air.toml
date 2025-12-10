@@ -1,0 +1,30 @@
+# .air.toml
+
+# Folder kerja utama project
+root = "."
+tmp_dir = "tmp"
+
+[build]
+# Perintah build – arahkan ke cmd/api
+cmd = "go build -o ./tmp/main ./cmd/api"
+# Output binary sementara
+bin = "tmp/main"
+
+# File/ekstensi yang dipantau
+include_ext = ["go", "tpl", "tmpl", "html"]
+exclude_dir = ["vendor", "tmp", "node_modules"]
+
+# Opsional: delay kecil biar nggak sering rebuild
+delay = 1000 # in milliseconds
+
+[log]
+time = true
+
+[color]
+main = "yellow"
+watcher = "cyan"
+build = "magenta"
+runner = "green"
+
+[misc]
+clean_on_exit = true
