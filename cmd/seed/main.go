@@ -120,7 +120,7 @@ func seedSampleTagsAndProject(db *gorm.DB) error {
 		}
 	}
 
-	// Sample project
+	// Sample projectx
 	p := models.Project{
 		Title:         "Personal Portfolio",
 		Slug:          "personal-portfolio",

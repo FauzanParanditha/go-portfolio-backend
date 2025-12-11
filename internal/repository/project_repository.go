@@ -28,12 +28,16 @@ func NewProjectRepository(db *gorm.DB) ProjectRepository {
 	return &projectRepository{db: db}
 }
 
+// baseQuery: preload semua relasi yang dibutuhkan untuk public response
 func (r *projectRepository) baseQuery() *gorm.DB {
 	return r.db.
 		Preload("Features", func(db *gorm.DB) *gorm.DB {
 			return db.Order("project_features.sort_order ASC")
 		}).
 		Preload("Tags").
+		Preload("Screenshots", func(db *gorm.DB) *gorm.DB {
+			return db.Order("project_screenshots.sort_order ASC")
+		}).
 		Order("projects.sort_order ASC").
 		Order("projects.created_at DESC")
 }
@@ -44,7 +48,7 @@ func (r *projectRepository) ListPublic(ctx context.Context, params ProjectListPa
 		total    int64
 	)
 
-	q := r.baseQuery()
+	q := r.baseQuery().Model(&models.Project{})
 
 	if params.FeaturedOnly {
 		q = q.Where("projects.is_featured = ?", true)
@@ -55,12 +59,14 @@ func (r *projectRepository) ListPublic(ctx context.Context, params ProjectListPa
 		q = q.Where(
 			r.db.
 				Where("LOWER(projects.title) LIKE ?", like).
-				Or("LOWER(projects.short_desc) LIKE ?", like),
+				Or("LOWER(projects.short_desc) LIKE ?", like).
+				Or("LOWER(projects.long_desc) LIKE ?", like).
+				Or("LOWER(projects.category) LIKE ?", like),
 		)
 	}
 
 	// hitung total (untuk pagination)
-	if err := q.WithContext(ctx).Model(&models.Project{}).Count(&total).Error; err != nil {
+	if err := q.WithContext(ctx).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 

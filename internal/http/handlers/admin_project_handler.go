@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -101,13 +103,18 @@ func (h *AdminProjectHandler) List(c *fiber.Ctx) error {
 			return db.Order("project_features.sort_order ASC")
 		}).
 		Preload("Tags").
+		Preload("Screenshots", func(db *gorm.DB) *gorm.DB {
+			return db.Order("project_screenshots.sort_order ASC")
+		}).
 		Model(&models.Project{})
 
 	if searchQ != "" {
 		like := "%" + searchQ + "%"
 		q = q.Where(
 			h.db.Where("projects.title ILIKE ?", like).
-				Or("projects.short_desc ILIKE ?", like),
+				Or("projects.short_desc ILIKE ?", like).
+				Or("projects.long_desc ILIKE ?", like).
+				Or("projects.category ILIKE ?", like),
 		)
 	}
 
@@ -181,6 +188,9 @@ func (h *AdminProjectHandler) GetByID(c *fiber.Ctx) error {
 			return db.Order("project_features.sort_order ASC")
 		}).
 		Preload("Tags").
+		Preload("Screenshots", func(db *gorm.DB) *gorm.DB {
+			return db.Order("project_screenshots.sort_order ASC")
+		}).
 		First(&project, "id = ?", id).Error; err != nil {
 
 		if err == gorm.ErrRecordNotFound {
@@ -202,7 +212,7 @@ func (h *AdminProjectHandler) GetByID(c *fiber.Ctx) error {
 // @Tags         admin-projects
 // @Security     BearerAuth
 // @Accept       json
-// @Produce      json
+// @Produce       json
 // @Param        payload  body  ProjectCreateRequest  true  "Project payload"
 // @Success      201      {object}  ProjectResponse
 // @Failure      400      {object}  ErrorResponse
@@ -228,6 +238,16 @@ func (h *AdminProjectHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusBadRequest, "invalid tagIds")
 	}
 
+	// marshal technicalDetails (map -> JSON)
+	var technicalDetails datatypes.JSON
+	if req.TechnicalDetails != nil {
+		if b, err := json.Marshal(req.TechnicalDetails); err == nil {
+			technicalDetails = datatypes.JSON(b)
+		} else {
+			log.Warn().Err(err).Msg("failed to marshal technicalDetails, ignoring")
+		}
+	}
+
 	tx := h.db.WithContext(ctx).Begin()
 	defer func() {
 		if r := recover(); r != nil {
@@ -239,11 +259,25 @@ func (h *AdminProjectHandler) Create(c *fiber.Ctx) error {
 		Title:         req.Title,
 		Slug:          req.Slug,
 		ShortDesc:     req.ShortDesc,
+		LongDesc:      req.LongDesc,
 		CoverImageURL: req.CoverImageURL,
-		LiveURL:       req.LiveURL,
-		SourceURL:     req.SourceURL,
-		IsFeatured:    req.IsFeatured,
-		SortOrder:     req.SortOrder,
+
+		Category: req.Category,
+		Timeline: req.Timeline,
+		Role:     req.Role,
+
+		Challenge: req.Challenge,
+		Solution:  req.Solution,
+
+		Results: req.Results,
+
+		TechnicalDetails: technicalDetails,
+
+		DemoURL: req.DemoURL,
+		RepoURL: req.RepoURL,
+
+		IsFeatured: req.IsFeatured,
+		SortOrder:  req.SortOrder,
 	}
 
 	// Handle tags (many-to-many)
@@ -285,6 +319,28 @@ func (h *AdminProjectHandler) Create(c *fiber.Ctx) error {
 		}
 	}
 
+	// Screenshots
+	if len(req.Screenshots) > 0 {
+		screens := make([]models.ProjectScreenshot, 0, len(req.Screenshots))
+		for i, url := range req.Screenshots {
+			if url == "" {
+				continue
+			}
+			screens = append(screens, models.ProjectScreenshot{
+				ProjectID: project.ID,
+				ImageURL:  url,
+				SortOrder: i,
+			})
+		}
+		if len(screens) > 0 {
+			if err := tx.Create(&screens).Error; err != nil {
+				tx.Rollback()
+				log.Error().Err(err).Msg("failed to create project screenshots")
+				return fiber.NewError(http.StatusInternalServerError, "failed to create project screenshots")
+			}
+		}
+	}
+
 	if err := tx.Commit().Error; err != nil {
 		log.Error().Err(err).Msg("failed to commit project create")
 		return fiber.NewError(http.StatusInternalServerError, "failed to create project")
@@ -296,6 +352,9 @@ func (h *AdminProjectHandler) Create(c *fiber.Ctx) error {
 			return db.Order("project_features.sort_order ASC")
 		}).
 		Preload("Tags").
+		Preload("Screenshots", func(db *gorm.DB) *gorm.DB {
+			return db.Order("project_screenshots.sort_order ASC")
+		}).
 		First(&project, "id = ?", project.ID).Error; err != nil {
 
 		log.Error().Err(err).Msg("failed to reload created project")
@@ -343,6 +402,16 @@ func (h *AdminProjectHandler) Update(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusBadRequest, "invalid tagIds")
 	}
 
+	// marshal technicalDetails (map -> JSON)
+	var technicalDetails datatypes.JSON
+	if req.TechnicalDetails != nil {
+		if b, err := json.Marshal(req.TechnicalDetails); err == nil {
+			technicalDetails = datatypes.JSON(b)
+		} else {
+			log.Warn().Err(err).Msg("failed to marshal technicalDetails, ignoring")
+		}
+	}
+
 	tx := h.db.WithContext(ctx).Begin()
 	defer func() {
 		if r := recover(); r != nil {
@@ -365,9 +434,24 @@ func (h *AdminProjectHandler) Update(c *fiber.Ctx) error {
 	project.Title = req.Title
 	project.Slug = req.Slug
 	project.ShortDesc = req.ShortDesc
+	project.LongDesc = req.LongDesc
 	project.CoverImageURL = req.CoverImageURL
-	project.LiveURL = req.LiveURL
-	project.SourceURL = req.SourceURL
+
+	project.Category = req.Category
+	project.Timeline = req.Timeline
+	project.Role = req.Role
+
+	project.Challenge = req.Challenge
+	project.Solution = req.Solution
+
+	project.Results = req.Results
+
+	if technicalDetails != nil {
+		project.TechnicalDetails = technicalDetails
+	}
+
+	project.DemoURL = req.DemoURL
+	project.RepoURL = req.RepoURL
 	project.IsFeatured = req.IsFeatured
 	project.SortOrder = req.SortOrder
 
@@ -427,6 +511,34 @@ func (h *AdminProjectHandler) Update(c *fiber.Ctx) error {
 		}
 	}
 
+	// Update screenshots: hapus dulu, buat ulang
+	if err := tx.Where("project_id = ?", project.ID).Delete(&models.ProjectScreenshot{}).Error; err != nil {
+		tx.Rollback()
+		log.Error().Err(err).Msg("failed to delete old project screenshots")
+		return fiber.NewError(http.StatusInternalServerError, "failed to update screenshots")
+	}
+
+	if len(req.Screenshots) > 0 {
+		screens := make([]models.ProjectScreenshot, 0, len(req.Screenshots))
+		for i, url := range req.Screenshots {
+			if url == "" {
+				continue
+			}
+			screens = append(screens, models.ProjectScreenshot{
+				ProjectID: project.ID,
+				ImageURL:  url,
+				SortOrder: i,
+			})
+		}
+		if len(screens) > 0 {
+			if err := tx.Create(&screens).Error; err != nil {
+				tx.Rollback()
+				log.Error().Err(err).Msg("failed to create new project screenshots")
+				return fiber.NewError(http.StatusInternalServerError, "failed to update screenshots")
+			}
+		}
+	}
+
 	if err := tx.Commit().Error; err != nil {
 		log.Error().Err(err).Msg("failed to commit project update")
 		return fiber.NewError(http.StatusInternalServerError, "failed to update project")
@@ -438,6 +550,9 @@ func (h *AdminProjectHandler) Update(c *fiber.Ctx) error {
 			return db.Order("project_features.sort_order ASC")
 		}).
 		Preload("Tags").
+		Preload("Screenshots", func(db *gorm.DB) *gorm.DB {
+			return db.Order("project_screenshots.sort_order ASC")
+		}).
 		First(&project, "id = ?", project.ID).Error; err != nil {
 
 		log.Error().Err(err).Msg("failed to reload updated project")
