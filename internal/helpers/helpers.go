@@ -39,6 +39,15 @@ func GetEnvInt(key string, def int) int {
 	return def
 }
 
+func GetEnvBool(key string, def bool) bool {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return def
+}
+
 func ParseDateStr(s string) (time.Time, error) {
 	return time.Parse("2006-01-02", s)
 }

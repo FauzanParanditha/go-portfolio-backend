@@ -48,5 +48,6 @@ func RegisterGlobal(app *fiber.App, cfg *config.Config) {
 		AllowOrigins: cfg.CORSAllowedOrigins,
 		AllowMethods: cfg.CORSAllowedMethods,
 		AllowHeaders: cfg.CORSAllowedHeaders,
+		AllowCredentials: cfg.CORSAllowCredentials,
 	}))
 }

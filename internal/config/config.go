@@ -16,6 +16,7 @@ type Config struct {
 	CORSAllowedOrigins string
 	CORSAllowedMethods string
 	CORSAllowedHeaders string
+	CORSAllowCredentials bool
 }
 
 func Load() *Config {
@@ -31,5 +32,6 @@ func Load() *Config {
 		CORSAllowedOrigins: helpers.GetEnv("CORS_ALLOWED_ORIGINS", "*"),
 		CORSAllowedMethods: helpers.GetEnv("CORS_ALLOWED_METHODS", "GET,POST,PUT,PATCH,DELETE,OPTIONS"),
 		CORSAllowedHeaders: helpers.GetEnv("CORS_ALLOWED_HEADERS", "Origin, Content-Type, Accept, Authorization"),
+		CORSAllowCredentials: helpers.GetEnvBool("CORS_ALLOW_CREDENTIALS", false),
 	}
 }

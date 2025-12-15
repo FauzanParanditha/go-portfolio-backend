@@ -31,6 +31,7 @@ func NewRouter(deps AppDeps) *fiber.App {
 	registerHealthRoutes(app, deps)
 
 	registerAuthRoutes(app, deps)
+	registerAuthMeRoutes(app, deps)
 
 	registerPublicProjectRoutes(app, deps)
 	registerPublicExperienceRoutes(app, deps)
@@ -178,4 +179,13 @@ func registerAdminContactRoutes(app *fiber.App, deps AppDeps) {
 	g.Get("/:id", contactHandler.GetByID)
 	g.Patch("/:id/read", contactHandler.MarkRead)
 	g.Delete("/:id", contactHandler.Delete)
+}
+
+func registerAuthMeRoutes(app *fiber.App, deps AppDeps) {
+	api := app.Group("/api/v1")
+
+	meHandler := handlers.NewMeHandler(deps.DB)
+
+	// wajib auth
+	api.Get("/me", middleware.AuthJWT(deps.Config), meHandler.Me)
 }

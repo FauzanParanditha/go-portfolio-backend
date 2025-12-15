@@ -44,10 +44,13 @@ func AuthJWT(cfg *config.Config) fiber.Handler {
 		if !ok || !token.Valid {
 			return fiber.NewError(fiber.StatusUnauthorized, "invalid token claims")
 		}
+		// log.Info().
+		// 	Interface("claims", claims).
+		// 	Msg("jwt claims")
 
 		// simpan ke context, bisa dipakai handler admin
-		c.Locals("userId", claims.UserID)
-		c.Locals("role", claims.Role)
+		c.Locals("user_id", claims.UserID)
+		c.Locals("user_role", claims.Role)
 
 		return c.Next()
 	}
