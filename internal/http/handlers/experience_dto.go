@@ -41,6 +41,7 @@ func experienceToResponse(e models.Experience) ExperienceResponse {
 	tags := make([]TagResponse, 0, len(e.Tags))
 	for _, t := range e.Tags {
 		tags = append(tags, TagResponse{
+			ID:   t.ID.String(),
 			Name: t.Name,
 			Type: t.Type,
 		})
