@@ -37,6 +37,7 @@ func NewRouter(deps AppDeps) *fiber.App {
 	registerPublicExperienceRoutes(app, deps)
 	registerPublicContactRoutes(app, deps)
 
+	registerAdminDasbboardRoute(app, deps)
 	registerAdminProjectRoutes(app, deps)
 	registerAdminTagRoutes(app, deps)
 	registerAdminExperienceRoutes(app, deps)
@@ -188,4 +189,14 @@ func registerAuthMeRoutes(app *fiber.App, deps AppDeps) {
 
 	// wajib auth
 	api.Get("/me", middleware.AuthJWT(deps.Config), meHandler.Me)
+}
+
+func registerAdminDasbboardRoute(app *fiber.App, deps AppDeps) {
+	api := app.Group("/api/v1")
+
+	admin := api.Group("/admin")
+	admin.Use(middleware.AuthJWT(deps.Config))
+
+	dashboardHandler := handlers.NewAdminDashboardHandler(deps.DB)
+	admin.Get("/dashboard/overview", dashboardHandler.Overview)
 }
