@@ -7,6 +7,7 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/helpers"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/helmet"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/rs/zerolog/log"
@@ -16,6 +17,9 @@ import (
 func RegisterGlobal(app *fiber.App, cfg *config.Config) {
 	// Panic safety
 	app.Use(recover.New())
+
+	// Security headers (X-Frame-Options, X-Content-Type-Options, HSTS, dll)
+	app.Use(helmet.New())
 
 	// Request ID
 	app.Use(requestid.New())

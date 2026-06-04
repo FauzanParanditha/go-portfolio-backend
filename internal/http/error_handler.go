@@ -6,6 +6,38 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// errorCodeForStatus memetakan HTTP status ke kode error yang stabil & mudah
+// dibaca client. Fallback ke pola umum (4xx -> CLIENT_ERROR, 5xx -> SERVER_ERROR).
+func errorCodeForStatus(status int) string {
+	switch status {
+	case fiber.StatusBadRequest:
+		return "BAD_REQUEST"
+	case fiber.StatusUnauthorized:
+		return "UNAUTHORIZED"
+	case fiber.StatusForbidden:
+		return "FORBIDDEN"
+	case fiber.StatusNotFound:
+		return "NOT_FOUND"
+	case fiber.StatusMethodNotAllowed:
+		return "METHOD_NOT_ALLOWED"
+	case fiber.StatusConflict:
+		return "CONFLICT"
+	case fiber.StatusUnprocessableEntity:
+		return "VALIDATION_ERROR"
+	case fiber.StatusTooManyRequests:
+		return "TOO_MANY_REQUESTS"
+	}
+
+	switch {
+	case status >= 500:
+		return "SERVER_ERROR"
+	case status >= 400:
+		return "CLIENT_ERROR"
+	default:
+		return "INTERNAL_ERROR"
+	}
+}
+
 func NewErrorHandler() fiber.ErrorHandler {
 	return func(c *fiber.Ctx, err error) error {
 		code := fiber.StatusInternalServerError
@@ -16,6 +48,7 @@ func NewErrorHandler() fiber.ErrorHandler {
 		if e, ok := err.(*fiber.Error); ok {
 			code = e.Code
 			msg = e.Message
+			errorCode = errorCodeForStatus(code)
 		}
 
 		// Kalau ada validation_errors di context → masukkan ke details

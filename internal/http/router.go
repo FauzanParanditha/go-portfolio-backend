@@ -2,12 +2,14 @@ package http
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/config"
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/handlers"
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/middleware"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"gorm.io/gorm"
 
 	fiberSwagger "github.com/gofiber/swagger"
@@ -21,12 +23,17 @@ type AppDeps struct {
 func NewRouter(deps AppDeps) *fiber.App {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: NewErrorHandler(),
+		// Batasi ukuran body untuk mencegah resource exhaustion (default 4MB).
+		BodyLimit: 1 * 1024 * 1024, // 1MB
 	})
 
 	middleware.RegisterGlobal(app, deps.Config)
 
-	// Swagger UI
-	app.Get("/swagger/*", fiberSwagger.HandlerDefault)
+	// Swagger UI hanya diaktifkan di luar produksi agar tidak membocorkan
+	// seluruh permukaan API ke publik.
+	if !deps.Config.IsProduction() {
+		app.Get("/swagger/*", fiberSwagger.HandlerDefault)
+	}
 
 	registerHealthRoutes(app, deps)
 
@@ -90,7 +97,17 @@ func registerAuthRoutes(app *fiber.App, deps AppDeps) {
 	api := app.Group("/api/v1")
 
 	authHandler := handlers.NewAuthHandler(deps.DB, deps.Config)
-	api.Post("/auth/login", authHandler.Login)
+
+	// Rate limit untuk mencegah brute-force / credential stuffing pada login.
+	loginLimiter := limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		LimitReached: func(c *fiber.Ctx) error {
+			return fiber.NewError(http.StatusTooManyRequests, "too many login attempts, please try again later")
+		},
+	})
+
+	api.Post("/auth/login", loginLimiter, authHandler.Login)
 }
 
 // Admin project routes
@@ -99,6 +116,7 @@ func registerAdminProjectRoutes(app *fiber.App, deps AppDeps) {
 
 	admin := api.Group("/admin")
 	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.RequireRole("admin"))
 
 	adminProjectHandler := handlers.NewAdminProjectHandler(deps.DB)
 
@@ -116,6 +134,7 @@ func registerAdminTagRoutes(app *fiber.App, deps AppDeps) {
 
 	admin := api.Group("/admin")
 	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.RequireRole("admin"))
 
 	repo := repository.NewTagRepository(deps.DB)
 	handler := handlers.NewAdminTagHandler(repo)
@@ -144,6 +163,7 @@ func registerAdminExperienceRoutes(app *fiber.App, deps AppDeps) {
 
 	admin := api.Group("/admin")
 	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.RequireRole("admin"))
 
 	handler := handlers.NewAdminExperienceHandler(deps.DB)
 
@@ -171,6 +191,7 @@ func registerAdminContactRoutes(app *fiber.App, deps AppDeps) {
 
 	admin := api.Group("/admin")
 	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.RequireRole("admin"))
 
 	contactRepo := repository.NewContactMessageRepository(deps.DB)
 	contactHandler := handlers.NewAdminContactHandler(deps.DB, contactRepo)
@@ -196,6 +217,7 @@ func registerAdminDasbboardRoute(app *fiber.App, deps AppDeps) {
 
 	admin := api.Group("/admin")
 	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.RequireRole("admin"))
 
 	dashboardHandler := handlers.NewAdminDashboardHandler(deps.DB)
 	admin.Get("/dashboard/overview", dashboardHandler.Overview)

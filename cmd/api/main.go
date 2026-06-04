@@ -30,6 +30,16 @@ func main() {
 	// Init zerolog global logger
 	logger.Init(cfg.AppEnv)
 
+	// Validasi konfigurasi keamanan.
+	// Di produksi, konfigurasi tidak aman menghentikan aplikasi.
+	// Di non-produksi cukup peringatan agar developer experience tetap lancar.
+	if err := cfg.Validate(); err != nil {
+		if cfg.IsProduction() {
+			log.Fatal().Err(err).Msg("refusing to start with insecure configuration")
+		}
+		log.Warn().Err(err).Msg("insecure configuration detected (allowed in non-production)")
+	}
+
 	log.Info().
 		Str("env", cfg.AppEnv).
 		Msg("starting ppnd-backend")
