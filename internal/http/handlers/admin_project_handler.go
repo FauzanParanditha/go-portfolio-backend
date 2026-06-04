@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/FauzanParanditha/portfolio-backend/internal/http/response"
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
 	"github.com/FauzanParanditha/portfolio-backend/internal/validation"
 	"github.com/gofiber/fiber/v2"
@@ -20,12 +21,13 @@ type ProjectUpdateRequest = ProjectCreateRequest
 
 // Response meta untuk list admin
 type PaginationMeta struct {
-	Page     int    `json:"page"`
-	Limit    int    `json:"limit"`
-	Total    int64  `json:"total"`
-	HasMore  bool   `json:"hasMore"`
-	Query    string `json:"q,omitempty"`
-	Featured bool   `json:"featured"`
+	Page       int    `json:"page"`
+	Limit      int    `json:"limit"`
+	Total      int64  `json:"total"`
+	TotalPages int64  `json:"totalPages"`
+	HasMore    bool   `json:"hasMore"`
+	Query      string `json:"q,omitempty"`
+	Featured   bool   `json:"featured"`
 }
 
 type AdminProjectHandler struct {
@@ -150,12 +152,13 @@ func (h *AdminProjectHandler) List(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"data": resp,
 		"meta": PaginationMeta{
-			Page:     page,
-			Limit:    limit,
-			Total:    total,
-			HasMore:  hasMore,
-			Query:    searchQ,
-			Featured: featured,
+			Page:       page,
+			Limit:      limit,
+			Total:      total,
+			TotalPages: response.TotalPages(total, limit),
+			HasMore:    hasMore,
+			Query:      searchQ,
+			Featured:   featured,
 		},
 	})
 }

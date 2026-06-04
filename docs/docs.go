@@ -744,7 +744,7 @@ const docTemplate = `{
         },
         "/auth/login": {
             "post": {
-                "description": "Authenticate admin and return JWT token",
+                "description": "Authenticate admin and return JWT token. Selain body JSON, server juga men-set cookie HttpOnly ` + "`" + `access_token` + "`" + ` (SameSite=Lax, Secure di produksi) yang dipakai klien browser. API client non-browser bisa mengabaikan cookie dan memakai field ` + "`" + `token` + "`" + ` di body via header Authorization.",
                 "consumes": [
                     "application/json"
                 ],
@@ -777,6 +777,58 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "description": "Menghapus cookie HttpOnly ` + "`" + `access_token` + "`" + ` di sisi browser (set cookie kedaluwarsa). Bersifat PUBLIK (tanpa auth) agar user dengan token kedaluwarsa tetap bisa membersihkan cookie. Karena auth stateless, token JWT lama TETAP valid sampai ` + "`" + `exp` + "`" + `-nya — tidak ada revocation server-side.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Logout",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/refresh": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Validasi token saat ini (via AuthJWT, menerima token dari header Authorization ATAU cookie ` + "`" + `access_token` + "`" + `) lalu terbitkan token baru (iat/exp segar) dengan userId+role yang sama. Juga men-set ulang cookie HttpOnly ` + "`" + `access_token` + "`" + `. Stateless, tanpa refresh-token store.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh JWT token",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.LoginResponse"
                         }
                     },
                     "401": {
@@ -850,6 +902,43 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/handlers.ExperienceResponse"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return authenticated admin user info from JWT",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get current user",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MeResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -1208,6 +1297,23 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.MeResponse": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.ProjectCreateRequest": {
             "type": "object",
             "required": [
@@ -1217,7 +1323,16 @@ const docTemplate = `{
                 "title"
             ],
             "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "challenge": {
+                    "type": "string"
+                },
                 "coverImageUrl": {
+                    "type": "string"
+                },
+                "demoUrl": {
                     "type": "string"
                 },
                 "features": {
@@ -1230,8 +1345,29 @@ const docTemplate = `{
                 "isFeatured": {
                     "type": "boolean"
                 },
-                "liveUrl": {
+                "longDescription": {
+                    "description": "boleh kosong, tapi idealnya diisi",
                     "type": "string"
+                },
+                "repoUrl": {
+                    "type": "string"
+                },
+                "results": {
+                    "description": "array bullet hasil",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "role": {
+                    "type": "string"
+                },
+                "screenshots": {
+                    "description": "list URL gambar, sederhana dulu",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "shortDesc": {
                     "type": "string"
@@ -1239,11 +1375,11 @@ const docTemplate = `{
                 "slug": {
                     "type": "string"
                 },
+                "solution": {
+                    "type": "string"
+                },
                 "sortOrder": {
                     "type": "integer"
-                },
-                "sourceUrl": {
-                    "type": "string"
                 },
                 "tagIds": {
                     "description": "list UUID string",
@@ -1251,6 +1387,14 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "technicalDetails": {
+                    "description": "JSON object",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "timeline": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"
@@ -1268,7 +1412,16 @@ const docTemplate = `{
         "handlers.ProjectResponse": {
             "type": "object",
             "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "challenge": {
+                    "type": "string"
+                },
                 "coverImageUrl": {
+                    "type": "string"
+                },
+                "demoUrl": {
                     "type": "string"
                 },
                 "features": {
@@ -1283,8 +1436,26 @@ const docTemplate = `{
                 "isFeatured": {
                     "type": "boolean"
                 },
-                "liveUrl": {
+                "longDescription": {
                     "type": "string"
+                },
+                "repoUrl": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "role": {
+                    "type": "string"
+                },
+                "screenshots": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ProjectScreenshotResponse"
+                    }
                 },
                 "shortDesc": {
                     "type": "string"
@@ -1292,8 +1463,11 @@ const docTemplate = `{
                 "slug": {
                     "type": "string"
                 },
-                "sourceUrl": {
+                "solution": {
                     "type": "string"
+                },
+                "sortOrder": {
+                    "type": "integer"
                 },
                 "tags": {
                     "type": "array",
@@ -1301,8 +1475,23 @@ const docTemplate = `{
                         "$ref": "#/definitions/handlers.TagResponse"
                     }
                 },
+                "technicalDetails": {},
+                "timeline": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.ProjectScreenshotResponse": {
+            "type": "object",
+            "properties": {
+                "imageUrl": {
+                    "type": "string"
+                },
+                "sortOrder": {
+                    "type": "integer"
                 }
             }
         },
@@ -1315,7 +1504,16 @@ const docTemplate = `{
                 "title"
             ],
             "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "challenge": {
+                    "type": "string"
+                },
                 "coverImageUrl": {
+                    "type": "string"
+                },
+                "demoUrl": {
                     "type": "string"
                 },
                 "features": {
@@ -1328,8 +1526,29 @@ const docTemplate = `{
                 "isFeatured": {
                     "type": "boolean"
                 },
-                "liveUrl": {
+                "longDescription": {
+                    "description": "boleh kosong, tapi idealnya diisi",
                     "type": "string"
+                },
+                "repoUrl": {
+                    "type": "string"
+                },
+                "results": {
+                    "description": "array bullet hasil",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "role": {
+                    "type": "string"
+                },
+                "screenshots": {
+                    "description": "list URL gambar, sederhana dulu",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "shortDesc": {
                     "type": "string"
@@ -1337,11 +1556,11 @@ const docTemplate = `{
                 "slug": {
                     "type": "string"
                 },
+                "solution": {
+                    "type": "string"
+                },
                 "sortOrder": {
                     "type": "integer"
-                },
-                "sourceUrl": {
-                    "type": "string"
                 },
                 "tagIds": {
                     "description": "list UUID string",
@@ -1349,6 +1568,14 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "technicalDetails": {
+                    "description": "JSON object",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "timeline": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"

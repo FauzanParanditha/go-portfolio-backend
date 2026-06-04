@@ -116,6 +116,42 @@ Format: `ADR-NNN | Judul | Status | Tanggal`. Status: `Accepted`, `Superseded`, 
 
 ---
 
+## ADR-009 | Unified response envelope + /auth/refresh + /contact-messages alias | Accepted | 2026-06
+
+**Konteks.** Envelope belum seragam: `POST /auth/login` & `GET /me` mengembalikan bare object, sementara endpoint lain `{ data, meta? }`. Frontend butuh pembacaan konsisten, paginasi yang gampang (`totalPages`), endpoint refresh token, dan penyelarasan path submit kontak. Sudah dikoordinasikan dengan agent frontend (lihat `docs/NOTES-FOR-*`).
+
+**Keputusan.**
+- **Envelope diseragamkan**: semua response sukses dibungkus `{ "data": <payload> }`; list menambahkan `meta`. `login` & `/me` ikut di-wrap (breaking change terkoordinasi). Envelope error tidak berubah.
+- **`totalPages = ceil(total/limit)`** ditambahkan ke `meta` semua endpoint list (guard `limit<=0` → 0); `hasMore` tetap ada.
+- **`POST /auth/refresh`** (baru): butuh `AuthJWT` (validasi token saat ini), terbitkan token baru (iat/exp segar, userId+role sama), bentuk response sama dengan login. **Stateless** — tanpa DB/refresh-token store, tanpa rate limiter login.
+- **`POST /contact-messages`** ditambahkan sebagai **alias publik** dari `POST /contact` (handler sama).
+
+**Konsekuensi.**
+- Auth tetap **bearer JWT stateless** (menggeser usulan Opsi A sebagian). **HttpOnly-cookie auth ditunda** sebagai future enhancement — saat ini frontend tetap mengirim token via header `Authorization: Bearer`. Refresh tidak punya revocation/rotation; token lama valid sampai `exp`.
+  - **Update:** "HttpOnly-cookie ditunda" ini **dicabut oleh ADR-010** — cookie auth kini diimplementasikan (sumber ganda: header + cookie).
+- Frontend menyesuaikan pembacaan ke `res.data.data.*` untuk `login`/`me` serempak dengan rilis ini.
+
+---
+
+## ADR-010 | Auth via HttpOnly cookie (Set-Cookie) + /auth/logout | Accepted | 2026-06
+
+**Konteks.** ADR-009 menunda "HttpOnly-cookie auth" (Opsi A) dan menyimpan token JWT di sisi browser via header `Authorization: Bearer` — artinya token harus disimpan di JS-accessible storage (mis. localStorage), yang rentan pencurian via XSS. Frontend ingin kredensial yang lebih aman tanpa membuang dukungan API client berbasis header. Dikoordinasikan dengan agent frontend (kontrak cookie identik diimplementasikan paralel).
+
+**Keputusan.** Mengangkat Opsi A: **autentikasi via cookie HttpOnly `access_token`** dengan **sumber ganda** di middleware `AuthJWT`.
+- **Middleware dual-source** (`internal/http/middleware/auth_jwt.go`): ambil token dari header `Authorization: Bearer` bila ada (prioritas, untuk API client & test), **ELSE** dari cookie `access_token` (`c.Cookies(...)`). Tidak ada keduanya → `401 "missing credentials"`. Logika validasi (HS256, enforce HMAC, secret & claims) tidak berubah.
+- **Cookie** di-set pada `POST /auth/login` dan `POST /auth/refresh` (selain tetap mengembalikan token di body untuk klien non-browser): `HttpOnly; Path=/; SameSite=Lax; Max-Age=JWT_EXPIRES_IN`. Flag **`Secure` hanya di produksi** (`cfg.IsProduction()`) supaya tetap berfungsi di `http://localhost` saat dev.
+- **`POST /auth/logout`** (baru, **publik/tanpa auth** agar user dengan token kedaluwarsa tetap bisa membersihkan cookie): set cookie kedaluwarsa (nilai kosong, `Max-Age` negatif / `Expires` di masa lalu). Response `200 { "data": { "message": "logged out" } }`.
+- Helper kecil `setAuthCookie` / `clearAuthCookie` menjaga atribut konsisten.
+
+**Konsekuensi.**
+- **Mencabut** catatan "HttpOnly-cookie ditunda" di ADR-009. ADR-003 (JWT HS256 stateless) tetap berlaku — ini hanya menambah jalur kredensial cookie, bukan mengganti algoritma.
+- **Mitigasi XSS**: token tidak lagi perlu disimpan di JS-accessible storage untuk browser; cookie HttpOnly tidak terbaca skrip.
+- **Tidak ada revocation server-side**: logout hanya menghapus cookie di browser. Token JWT lama **tetap valid sampai `exp`** (siapa pun yang sempat menyalinnya masih bisa memakainya). Mitigasi tetap masa berlaku pendek (`JWT_EXPIRES_IN`).
+- **CORS dengan credentials**: cross-origin cookie butuh `CORS_ALLOW_CREDENTIALS=true` + origin eksplisit (bukan `*`); `config.Validate()` melarang `*`+credentials. Browser harus pakai `withCredentials`.
+- **Caveat SameSite=Lax**: cocok untuk dev (FE `localhost:3000` ↔ BE `localhost:8080` dianggap same-site oleh sebagian besar browser) dan deployment same-site. Untuk deployment **benar-benar cross-site** di produksi (FE & BE beda registrable domain), cookie perlu `SameSite=None; Secure` agar terkirim pada request cross-site — sesuaikan bila topologi berubah.
+
+---
+
 ## Template entri baru
 
 ```

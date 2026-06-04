@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/FauzanParanditha/portfolio-backend/internal/http/response"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/FauzanParanditha/portfolio-backend/internal/validation"
 	"github.com/gofiber/fiber/v2"
@@ -88,12 +89,13 @@ func (h *AdminContactHandler) List(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"data": resp,
 		"meta": fiber.Map{
-			"page":    page,
-			"limit":   limit,
-			"total":   total,
-			"hasMore": hasMore,
-			"q":       q,
-			"isRead":  isReadStr,
+			"page":       page,
+			"limit":      limit,
+			"total":      total,
+			"totalPages": response.TotalPages(total, limit),
+			"hasMore":    hasMore,
+			"q":          q,
+			"isRead":     isReadStr,
 		},
 	})
 }

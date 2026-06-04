@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/FauzanParanditha/portfolio-backend/internal/http/response"
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/FauzanParanditha/portfolio-backend/internal/validation"
@@ -68,11 +69,12 @@ func (h *AdminTagHandler) List(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"data": resp,
 		"meta": fiber.Map{
-			"page":    page,
-			"limit":   limit,
-			"total":   total,
-			"hasMore": int64(page*limit) < total,
-			"q":       q,
+			"page":       page,
+			"limit":      limit,
+			"total":      total,
+			"totalPages": response.TotalPages(total, limit),
+			"hasMore":    int64(page*limit) < total,
+			"q":          q,
 		},
 	})
 }

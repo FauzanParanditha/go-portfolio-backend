@@ -15,17 +15,23 @@ func AuthJWT(cfg *config.Config) fiber.Handler {
 	secret := []byte(cfg.JWTSecret)
 
 	return func(c *fiber.Ctx) error {
+		// Dual-source: token diambil dari header Authorization (prioritas, untuk
+		// API client & test berbasis header), ELSE dari cookie HttpOnly
+		// `access_token` (dipakai browser via withCredentials).
+		var tokenStr string
+
 		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return fiber.NewError(fiber.StatusUnauthorized, "missing Authorization header")
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+				return fiber.NewError(fiber.StatusUnauthorized, "invalid Authorization header format")
+			}
+			tokenStr = parts[1]
+		} else if cookie := c.Cookies("access_token"); cookie != "" {
+			tokenStr = cookie
+		} else {
+			return fiber.NewError(fiber.StatusUnauthorized, "missing credentials")
 		}
-
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			return fiber.NewError(fiber.StatusUnauthorized, "invalid Authorization header format")
-		}
-
-		tokenStr := parts[1]
 
 		token, err := jwt.ParseWithClaims(tokenStr, &handlers.JWTCustomClaims{}, func(t *jwt.Token) (interface{}, error) {
 			// pastikan method HS256

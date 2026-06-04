@@ -108,6 +108,14 @@ func registerAuthRoutes(app *fiber.App, deps AppDeps) {
 	})
 
 	api.Post("/auth/login", loginLimiter, authHandler.Login)
+
+	// Refresh menerbitkan token baru dari token valid yang sedang dipakai.
+	// Butuh auth (AuthJWT) tapi TIDAK pakai rate limiter login. Stateless.
+	api.Post("/auth/refresh", middleware.AuthJWT(deps.Config), authHandler.Refresh)
+
+	// Logout PUBLIK (tanpa auth) agar user dengan token kedaluwarsa tetap bisa
+	// membersihkan cookie HttpOnly `access_token` di browser.
+	api.Post("/auth/logout", authHandler.Logout)
 }
 
 // Admin project routes
@@ -183,6 +191,9 @@ func registerPublicContactRoutes(app *fiber.App, deps AppDeps) {
 	contactHandler := handlers.NewContactHandler(contactRepo)
 
 	api.Post("/contact", contactHandler.Create)
+	// Alias publik untuk konsistensi penamaan dengan resource admin/contact-messages.
+	// Menunjuk ke handler yang SAMA.
+	api.Post("/contact-messages", contactHandler.Create)
 }
 
 // Admin contact route

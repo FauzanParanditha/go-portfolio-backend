@@ -58,18 +58,22 @@ func (h *MeHandler) Me(c *fiber.Ctx) error {
 			return fiber.NewError(http.StatusInternalServerError, "failed to fetch user")
 		}
 
-		return c.JSON(MeResponse{
-			ID:    user.ID.String(),
-			Name:  user.Name,
-			Email: user.Email,
-			Role:  user.Role, // kalau tidak ada, hapus field ini
+		return c.JSON(fiber.Map{
+			"data": MeResponse{
+				ID:    user.ID.String(),
+				Name:  user.Name,
+				Email: user.Email,
+				Role:  user.Role, // kalau tidak ada, hapus field ini
+			},
 		})
 	}
 
-	return c.JSON(MeResponse{
-		ID:    userID,
-		Name:  name,
-		Email: email,
-		Role:  role,
+	return c.JSON(fiber.Map{
+		"data": MeResponse{
+			ID:    userID,
+			Name:  name,
+			Email: email,
+			Role:  role,
+		},
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/helpers"
+	"github.com/FauzanParanditha/portfolio-backend/internal/http/response"
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
 	"github.com/FauzanParanditha/portfolio-backend/internal/validation"
 	"github.com/gofiber/fiber/v2"
@@ -95,12 +96,13 @@ func (h *AdminExperienceHandler) List(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"data": resp,
 		"meta": PaginationMeta{
-			Page:     page,
-			Limit:    limit,
-			Total:    total,
-			HasMore:  hasMore,
-			Query:    q,
-			Featured: false, // nggak relevan di experiences, tapi field-nya ada
+			Page:       page,
+			Limit:      limit,
+			Total:      total,
+			TotalPages: response.TotalPages(total, limit),
+			HasMore:    hasMore,
+			Query:      q,
+			Featured:   false, // nggak relevan di experiences, tapi field-nya ada
 		},
 	})
 }

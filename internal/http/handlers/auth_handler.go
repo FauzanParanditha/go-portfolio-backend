@@ -44,10 +44,45 @@ type JWTCustomClaims struct {
 	jwt.RegisteredClaims
 }
 
+// accessTokenCookieName adalah nama cookie HttpOnly yang menyimpan JWT untuk
+// klien browser. API client non-browser tetap bisa pakai header Authorization.
+const accessTokenCookieName = "access_token"
+
+// setAuthCookie menulis cookie `access_token` yang berisi JWT.
+// Atribut: HttpOnly, Path=/, SameSite=Lax, Max-Age=JWT_EXPIRES_IN detik.
+// Flag Secure hanya dipasang di produksi agar tetap jalan di http://localhost saat dev.
+func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, token string) {
+	c.Cookie(&fiber.Cookie{
+		Name:     accessTokenCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   h.cfg.JWTExpiresIn,
+		HTTPOnly: true,
+		Secure:   h.cfg.IsProduction(),
+		SameSite: "Lax",
+	})
+}
+
+// clearAuthCookie menghapus cookie `access_token` dengan menulis cookie kedaluwarsa
+// (nilai kosong, Expires di masa lalu / MaxAge negatif). Atribut Path/Secure/SameSite
+// dijaga konsisten dengan setAuthCookie agar browser benar-benar menimpanya.
+func (h *AuthHandler) clearAuthCookie(c *fiber.Ctx) {
+	c.Cookie(&fiber.Cookie{
+		Name:     accessTokenCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+		HTTPOnly: true,
+		Secure:   h.cfg.IsProduction(),
+		SameSite: "Lax",
+	})
+}
+
 // POST /api/v1/auth/login
 // Login godoc
 // @Summary      Login admin
-// @Description  Authenticate admin and return JWT token
+// @Description  Authenticate admin and return JWT token. Selain body JSON, server juga men-set cookie HttpOnly `access_token` (SameSite=Lax, Secure di produksi) yang dipakai klien browser. API client non-browser bisa mengabaikan cookie dan memakai field `token` di body via header Authorization.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
@@ -89,31 +124,97 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusUnauthorized, "invalid credentials")
 	}
 
-	// Generate JWT
+	// Generate JWT (iat/exp segar) lewat helper bersama.
+	signed, err := h.issueToken(user.ID.String(), user.Role)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to sign JWT")
+		return fiber.NewError(http.StatusInternalServerError, "failed to generate token")
+	}
+
+	// Set cookie HttpOnly untuk klien browser; body token tetap dikembalikan
+	// untuk API client non-browser & test.
+	h.setAuthCookie(c, signed)
+
+	// Envelope diseragamkan: semua response sukses dibungkus { "data": ... }.
+	return c.JSON(fiber.Map{
+		"data": LoginResponse{
+			Token:     signed,
+			TokenType: "Bearer",
+			ExpiresIn: h.cfg.JWTExpiresIn,
+		},
+	})
+}
+
+// issueToken membuat JWT HS256 baru (iat/exp segar) untuk userID+role tertentu.
+// Dipakai bersama oleh Login dan Refresh agar bentuk token konsisten.
+func (h *AuthHandler) issueToken(userID, role string) (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Duration(h.cfg.JWTExpiresIn) * time.Second)
 
 	claims := JWTCustomClaims{
-		UserID: user.ID.String(),
-		Role:   user.Role,
+		UserID: userID,
+		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   user.ID.String(),
+			Subject:   userID,
 			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(h.cfg.JWTSecret))
+}
 
-	signed, err := token.SignedString([]byte(h.cfg.JWTSecret))
+// POST /api/v1/auth/refresh
+// Refresh godoc
+// @Summary      Refresh JWT token
+// @Description  Validasi token saat ini (via AuthJWT, menerima token dari header Authorization ATAU cookie `access_token`) lalu terbitkan token baru (iat/exp segar) dengan userId+role yang sama. Juga men-set ulang cookie HttpOnly `access_token`. Stateless, tanpa refresh-token store.
+// @Tags         auth
+// @Security     BearerAuth
+// @Produce      json
+// @Success      200  {object}  LoginResponse
+// @Failure      401  {object}  ErrorResponse
+// @Router       /auth/refresh [post]
+func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
+	// AuthJWT (middleware) sudah memvalidasi token & menyimpan klaim ke Locals.
+	userID, ok := c.Locals("user_id").(string)
+	if !ok || userID == "" {
+		return fiber.NewError(http.StatusUnauthorized, "unauthorized")
+	}
+	role, _ := c.Locals("user_role").(string)
+
+	signed, err := h.issueToken(userID, role)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to sign JWT")
+		log.Error().Err(err).Msg("failed to sign refreshed JWT")
 		return fiber.NewError(http.StatusInternalServerError, "failed to generate token")
 	}
 
-	return c.JSON(LoginResponse{
-		Token:     signed,
-		TokenType: "Bearer",
-		ExpiresIn: h.cfg.JWTExpiresIn,
+	// Set ulang cookie HttpOnly dengan token segar.
+	h.setAuthCookie(c, signed)
+
+	return c.JSON(fiber.Map{
+		"data": LoginResponse{
+			Token:     signed,
+			TokenType: "Bearer",
+			ExpiresIn: h.cfg.JWTExpiresIn,
+		},
+	})
+}
+
+// POST /api/v1/auth/logout
+// Logout godoc
+// @Summary      Logout
+// @Description  Menghapus cookie HttpOnly `access_token` di sisi browser (set cookie kedaluwarsa). Bersifat PUBLIK (tanpa auth) agar user dengan token kedaluwarsa tetap bisa membersihkan cookie. Karena auth stateless, token JWT lama TETAP valid sampai `exp`-nya — tidak ada revocation server-side.
+// @Tags         auth
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Router       /auth/logout [post]
+func (h *AuthHandler) Logout(c *fiber.Ctx) error {
+	h.clearAuthCookie(c)
+
+	return c.JSON(fiber.Map{
+		"data": fiber.Map{
+			"message": "logged out",
+		},
 	})
 }

@@ -14,6 +14,8 @@ Kontrak tingkat tinggi untuk Portfolio Backend API. Untuk skema request/response
 
 ### Sukses
 
+Envelope **diseragamkan**: **setiap** response sukses dibungkus `{ "data": <payload> }` — termasuk `POST /auth/login` dan `GET /me` (sebelumnya bare object, kini di-wrap).
+
 Objek tunggal atau aksi:
 
 ```json
@@ -29,12 +31,15 @@ List berpaginasi menambahkan `meta`:
     "page": 1,
     "limit": 12,
     "total": 42,
+    "totalPages": 4,
     "hasMore": true,
     "q": "keyword",
     "featured": false
   }
 }
 ```
+
+> `totalPages` = `ceil(total / limit)` (0 jika `limit <= 0`). Ada di **semua** endpoint list (projects publik & admin, admin experiences, admin tags, admin contact-messages). `hasMore` tetap dipertahankan.
 
 ### Error
 
@@ -86,7 +91,12 @@ Diturunkan dari HTTP status secara terpusat:
 
 ## Autentikasi
 
-Skema **Bearer JWT**. Dapatkan token via login, lalu kirim di header:
+Skema **JWT (HS256)** dengan **dua sumber kredensial** — middleware `AuthJWT` menerima token dari salah satu, dengan urutan prioritas:
+
+1. **Header** `Authorization: Bearer <token>` (untuk API client non-browser & test).
+2. **Cookie HttpOnly** `access_token` (untuk klien browser) — dipakai jika header tidak ada.
+
+Jika keduanya tidak ada → `401` (`missing credentials`).
 
 ```
 Authorization: Bearer <token>
@@ -98,6 +108,23 @@ Authorization: Bearer <token>
 | Masa berlaku    | `JWT_EXPIRES_IN` detik (default 3600) |
 | Claims          | `userId`, `role`, `sub`, `exp`, `iat` |
 | Token type      | `Bearer` |
+
+### Cookie HttpOnly (klien browser)
+
+`POST /auth/login` dan `POST /auth/refresh` selain mengembalikan token di body **juga men-set** cookie `access_token`:
+
+| Atribut    | Nilai |
+| ---------- | ----- |
+| Name       | `access_token` |
+| Value      | JWT yang ditandatangani |
+| HttpOnly   | ya (tidak bisa dibaca JS → mitigasi pencurian token via XSS) |
+| Path       | `/` |
+| SameSite   | `Lax` |
+| Max-Age    | `JWT_EXPIRES_IN` detik |
+| Secure     | **hanya di produksi** (`APP_ENV=production`) — agar tetap jalan di `http://localhost` saat dev |
+
+- **Browser**: pakai cookie (mengabaikan token di body). Wajib `withCredentials: true` (axios) / `credentials: 'include'` (fetch) di semua request agar cookie ikut terkirim. CORS server harus `AllowCredentials=true` dengan origin eksplisit (bukan `*`).
+- **API client non-browser**: abaikan cookie, simpan `data.token`, kirim via header `Authorization: Bearer`.
 
 **Tingkat akses:**
 - **Publik** — tanpa token.
@@ -136,21 +163,42 @@ Endpoint list menerima query params:
 
 ### Auth
 
-| Method | Path          | Auth | Keterangan |
-| ------ | ------------- | ---- | ---------- |
-| POST   | `/auth/login` | —    | Login admin. **Rate-limited 10 req/menit** (`429` jika terlampaui) |
-| GET    | `/me`         | JWT  | Info user saat ini |
+| Method | Path            | Auth | Keterangan |
+| ------ | --------------- | ---- | ---------- |
+| POST   | `/auth/login`   | —    | Login admin. **Rate-limited 10 req/menit** (`429` jika terlampaui). Set cookie `access_token` + body token |
+| POST   | `/auth/refresh` | JWT (header **atau** cookie) | Terbitkan token baru dari token valid yang sedang dipakai; set ulang cookie `access_token`. **Tidak** rate-limited. Stateless (tanpa DB/refresh-token store) |
+| POST   | `/auth/logout`  | —    | **Publik.** Hapus cookie `access_token` (set cookie kedaluwarsa). Tidak ada revocation server-side — token JWT lama tetap valid sampai `exp` |
+| GET    | `/me`           | JWT (header **atau** cookie) | Info user saat ini |
 
 `POST /auth/login`
 ```json
 // request
 { "email": "admin@example.com", "password": "secret" }
-// 200
-{ "token": "<jwt>", "tokenType": "Bearer", "expiresIn": 3600 }
+// 200 — payload di-wrap dalam "data"; server JUGA mengirim header
+//   Set-Cookie: access_token=<jwt>; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600  (+ Secure di produksi)
+{ "data": { "token": "<jwt>", "tokenType": "Bearer", "expiresIn": 3600 } }
 // 401 → { "error": { "message": "invalid credentials", ... } }
 ```
 
+`POST /auth/logout`
+```json
+// request — tanpa body, tanpa auth (publik)
+// 200 — server mengirim header Set-Cookie yang mengosongkan access_token (Max-Age=0)
+{ "data": { "message": "logged out" } }
+```
+
 > Pesan error login sengaja generik (`invalid credentials`) untuk email salah maupun password salah — mencegah enumerasi user.
+
+`POST /auth/refresh`
+```json
+// request — tanpa body; kirim token saat ini via header Authorization: Bearer <token>
+//   ATAU cookie access_token (browser otomatis mengirimnya bila withCredentials)
+// 200 — bentuk SAMA dengan login (token baru: iat/exp segar, userId+role sama); set ulang cookie access_token
+{ "data": { "token": "<jwt>", "tokenType": "Bearer", "expiresIn": 3600 } }
+// 401 → token hilang/invalid/kedaluwarsa
+```
+
+> Refresh memakai middleware `AuthJWT` yang sama (validasi HS256, enforce signing method, secret yang sama). Tidak ada revocation/rotation server-side; token lama tetap valid sampai `exp`-nya.
 
 ### Projects (publik)
 
@@ -167,11 +215,12 @@ Endpoint list menerima query params:
 
 ### Contact (publik)
 
-| Method | Path       | Keterangan |
-| ------ | ---------- | ---------- |
-| POST   | `/contact` | Kirim pesan kontak |
+| Method | Path                | Keterangan |
+| ------ | ------------------- | ---------- |
+| POST   | `/contact`          | Kirim pesan kontak |
+| POST   | `/contact-messages` | **Alias** dari `/contact` (handler sama) untuk konsistensi penamaan dengan `admin/contact-messages` |
 
-`POST /contact`
+`POST /contact` (dan alias `/contact-messages`)
 ```json
 // request — semua field required, email tervalidasi
 { "name": "Jane", "email": "jane@x.com", "subject": "Halo", "message": "..." }

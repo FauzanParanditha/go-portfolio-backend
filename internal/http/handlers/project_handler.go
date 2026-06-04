@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/FauzanParanditha/portfolio-backend/internal/http/response"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog/log"
@@ -82,12 +83,13 @@ func (h *ProjectHandler) List(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"data": resp,
 		"meta": fiber.Map{
-			"page":     page,
-			"limit":    limit,
-			"total":    total,
-			"hasMore":  hasMore,
-			"q":        searchQ,
-			"featured": featured,
+			"page":       page,
+			"limit":      limit,
+			"total":      total,
+			"totalPages": response.TotalPages(total, limit),
+			"hasMore":    hasMore,
+			"q":          searchQ,
+			"featured":   featured,
 		},
 	})
 }

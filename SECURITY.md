@@ -1,6 +1,6 @@
 # Security
 
-Dokumen ini merangkum kontrol keamanan yang berlaku di Portfolio Backend, **invarian yang tidak boleh diregres**, dan panduan pelaporan kerentanan. Konteks keputusan ada di [`docs/DECISIONS.md`](docs/DECISIONS.md) (ADR-003, ADR-007).
+Dokumen ini merangkum kontrol keamanan yang berlaku di Portfolio Backend, **invarian yang tidak boleh diregres**, dan panduan pelaporan kerentanan. Konteks keputusan ada di [`docs/DECISIONS.md`](docs/DECISIONS.md) (ADR-003, ADR-007, ADR-010).
 
 ## Melaporkan Kerentanan
 
@@ -22,6 +22,7 @@ Aturan berikut sudah ditegakkan dan diverifikasi. Setiap perubahan yang melangga
 8. **Swagger** — UI hanya di-mount saat `APP_ENV` ≠ `production`.
 9. **CORS** — origin dari env; `*` dilarang berbarengan dengan credentials (ditolak `config.Validate()`).
 10. **Secrets** — `.env` di-gitignore dan tidak boleh di-commit; gunakan `.env.example` sebagai template.
+11. **Cookie auth HttpOnly** — kredensial browser disimpan di cookie `access_token` dengan flag **`HttpOnly`** (tidak terbaca JS) dan `SameSite=Lax`; flag `Secure` wajib aktif di produksi (otomatis via `cfg.IsProduction()`). Jangan men-set cookie token tanpa `HttpOnly`, dan jangan mengekspos JWT ke storage JS-accessible.
 
 ---
 
@@ -31,6 +32,7 @@ Aturan berikut sudah ditegakkan dan diverifikasi. Setiap perubahan yang melangga
 | ------- | -------- |
 | Brute-force / credential stuffing login | Rate limiter 10/menit; bcrypt (lambat by design) |
 | Forge JWT (alg confusion / `alg=none`) | Middleware memaksa signing method HMAC; secret kuat (HS256) |
+| Pencurian token via XSS | Kredensial browser di cookie `HttpOnly` (tidak terbaca JS); `Secure` di produksi. API client tetap boleh kirim via header `Authorization: Bearer` |
 | Privilege escalation ke endpoint admin | `RequireRole("admin")` pada semua route admin |
 | SQL injection | GORM parameterized di seluruh repository/handler |
 | User enumeration via login | Pesan error generik `invalid credentials` untuk semua kegagalan |
@@ -46,12 +48,12 @@ Aturan berikut sudah ditegakkan dan diverifikasi. Setiap perubahan yang melangga
 
 | Area | Lokasi |
 | ---- | ------ |
-| Verifikasi JWT | `internal/http/middleware/auth_jwt.go` |
+| Verifikasi JWT (sumber ganda: header Authorization **atau** cookie `access_token`) | `internal/http/middleware/auth_jwt.go` |
 | Cek role | `internal/http/middleware/require_role.go` |
 | Middleware global (helmet, CORS, recover, logger) | `internal/http/middleware/middleware.go` |
 | Rate limit login | `internal/http/router.go` (`registerAuthRoutes`) |
 | Validasi config & fail-fast | `internal/config/config.go` (`Validate`, `IsProduction`) |
-| Hashing & login | `internal/http/handlers/auth_handler.go` |
+| Hashing, login, logout & set/clear cookie HttpOnly | `internal/http/handlers/auth_handler.go` (`setAuthCookie`/`clearAuthCookie`, `Logout`) |
 | Error handler terpusat | `internal/http/error_handler.go` |
 
 Test verifikasi otorisasi: `internal/http/middleware/require_role_test.go` (memastikan non-admin → 403, token salah-secret → 401). Jalankan:
