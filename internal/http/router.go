@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/config"
+	"github.com/FauzanParanditha/portfolio-backend/internal/denylist"
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/handlers"
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/middleware"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
@@ -16,8 +17,9 @@ import (
 )
 
 type AppDeps struct {
-	DB     *gorm.DB
-	Config *config.Config
+	DB       *gorm.DB
+	Config   *config.Config
+	Denylist denylist.Denylist
 }
 
 func NewRouter(deps AppDeps) *fiber.App {
@@ -26,6 +28,12 @@ func NewRouter(deps AppDeps) *fiber.App {
 		// Batasi ukuran body untuk mencegah resource exhaustion (default 4MB).
 		BodyLimit: 1 * 1024 * 1024, // 1MB
 	})
+
+	// Denylist token (revocation saat logout). Satu instance dibagikan ke
+	// middleware AuthJWT dan handler auth. Dibuat di sini bila belum di-inject.
+	if deps.Denylist == nil {
+		deps.Denylist = denylist.NewMemory()
+	}
 
 	middleware.RegisterGlobal(app, deps.Config)
 
@@ -96,7 +104,7 @@ func registerPublicProjectRoutes(app *fiber.App, deps AppDeps) {
 func registerAuthRoutes(app *fiber.App, deps AppDeps) {
 	api := app.Group("/api/v1")
 
-	authHandler := handlers.NewAuthHandler(deps.DB, deps.Config)
+	authHandler := handlers.NewAuthHandler(deps.DB, deps.Config, deps.Denylist)
 
 	// Rate limit untuk mencegah brute-force / credential stuffing pada login.
 	loginLimiter := limiter.New(limiter.Config{
@@ -111,7 +119,7 @@ func registerAuthRoutes(app *fiber.App, deps AppDeps) {
 
 	// Refresh menerbitkan token baru dari token valid yang sedang dipakai.
 	// Butuh auth (AuthJWT) tapi TIDAK pakai rate limiter login. Stateless.
-	api.Post("/auth/refresh", middleware.AuthJWT(deps.Config), authHandler.Refresh)
+	api.Post("/auth/refresh", middleware.AuthJWT(deps.Config, deps.Denylist), authHandler.Refresh)
 
 	// Logout PUBLIK (tanpa auth) agar user dengan token kedaluwarsa tetap bisa
 	// membersihkan cookie HttpOnly `access_token` di browser.
@@ -123,7 +131,7 @@ func registerAdminProjectRoutes(app *fiber.App, deps AppDeps) {
 	api := app.Group("/api/v1")
 
 	admin := api.Group("/admin")
-	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.AuthJWT(deps.Config, deps.Denylist))
 	admin.Use(middleware.RequireRole("admin"))
 
 	adminProjectHandler := handlers.NewAdminProjectHandler(deps.DB)
@@ -141,7 +149,7 @@ func registerAdminTagRoutes(app *fiber.App, deps AppDeps) {
 	api := app.Group("/api/v1")
 
 	admin := api.Group("/admin")
-	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.AuthJWT(deps.Config, deps.Denylist))
 	admin.Use(middleware.RequireRole("admin"))
 
 	repo := repository.NewTagRepository(deps.DB)
@@ -170,7 +178,7 @@ func registerAdminExperienceRoutes(app *fiber.App, deps AppDeps) {
 	api := app.Group("/api/v1")
 
 	admin := api.Group("/admin")
-	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.AuthJWT(deps.Config, deps.Denylist))
 	admin.Use(middleware.RequireRole("admin"))
 
 	handler := handlers.NewAdminExperienceHandler(deps.DB)
@@ -201,7 +209,7 @@ func registerAdminContactRoutes(app *fiber.App, deps AppDeps) {
 	api := app.Group("/api/v1")
 
 	admin := api.Group("/admin")
-	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.AuthJWT(deps.Config, deps.Denylist))
 	admin.Use(middleware.RequireRole("admin"))
 
 	contactRepo := repository.NewContactMessageRepository(deps.DB)
@@ -220,14 +228,14 @@ func registerAuthMeRoutes(app *fiber.App, deps AppDeps) {
 	meHandler := handlers.NewMeHandler(deps.DB)
 
 	// wajib auth
-	api.Get("/me", middleware.AuthJWT(deps.Config), meHandler.Me)
+	api.Get("/me", middleware.AuthJWT(deps.Config, deps.Denylist), meHandler.Me)
 }
 
 func registerAdminDasbboardRoute(app *fiber.App, deps AppDeps) {
 	api := app.Group("/api/v1")
 
 	admin := api.Group("/admin")
-	admin.Use(middleware.AuthJWT(deps.Config))
+	admin.Use(middleware.AuthJWT(deps.Config, deps.Denylist))
 	admin.Use(middleware.RequireRole("admin"))
 
 	dashboardHandler := handlers.NewAdminDashboardHandler(deps.DB)

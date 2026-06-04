@@ -152,6 +152,24 @@ Format: `ADR-NNN | Judul | Status | Tanggal`. Status: `Accepted`, `Superseded`, 
 
 ---
 
+## ADR-011 | Token revocation saat logout via denylist jti (in-memory) | Accepted | 2026-06
+
+**Konteks.** ADR-010 menambahkan `POST /auth/logout` tetapi hanya menghapus cookie browser; token JWT lama tetap valid sampai `exp` (tidak ada revocation server-side). Untuk logout yang benar-benar mematikan sesi, token aktif harus bisa dibatalkan sebelum kedaluwarsa.
+
+**Keputusan.** Revocation berbasis **jti** + **denylist**.
+- Setiap token yang diterbitkan (`issueToken` → login & refresh) kini menyertakan **`jti`** unik (`RegisteredClaims.ID`, UUID).
+- Paket `internal/denylist` mendefinisikan interface `Denylist` (`Revoke(jti, exp)`, `IsRevoked(jti)`) dengan implementasi default **`Memory`** (in-memory, aman-konkuren, janitor pembersih entri lewat-exp tiap 10 menit). TTL entri = `exp` token.
+- `AuthJWT` menerima `Denylist` dan **menolak `401 "token revoked"`** bila `jti` token ada di denylist. Satu instance dibuat di `NewRouter` dan dibagikan ke seluruh middleware + handler auth.
+- `POST /auth/logout` mem-parse token saat ini (header/cookie, validasi penuh) lalu `Revoke(jti, exp)` — token langsung tidak berlaku. Logout tetap publik & idempotent (token tidak ada/kedaluwarsa cukup diabaikan).
+
+**Konsekuensi.**
+- **Logout kini instan** untuk single-instance: token yang dicabut langsung `401`, tidak menunggu `exp`. ADR-009/010 yang menyatakan "tidak ada revocation" diperbarui oleh ADR ini.
+- **Keterbatasan in-memory (sadar)**: denylist hilang saat proses **restart** (token tercabut bisa valid lagi sampai exp-nya) dan **tidak dibagi antar-instance**. Memadai untuk deployment single-instance (portfolio). 
+- **Jalur upgrade**: karena `Denylist` adalah interface, implementasi berbasis **DB/Redis** (durable + multi-instance) dapat di-drop-in tanpa mengubah middleware/handler — kandidat bila aplikasi diskalakan horizontal.
+- Token lama (pra-perubahan) tanpa `jti` → `IsRevoked("")` selalu false → tetap valid sampai exp (transisi mulus).
+
+---
+
 ## Template entri baru
 
 ```

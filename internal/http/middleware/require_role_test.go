@@ -42,7 +42,7 @@ func signToken(t *testing.T, secret, role string) string {
 func newAdminApp(cfg *config.Config) *fiber.App {
 	app := fiber.New()
 	admin := app.Group("/admin")
-	admin.Use(middleware.AuthJWT(cfg))
+	admin.Use(middleware.AuthJWT(cfg, nil))
 	admin.Use(middleware.RequireRole("admin"))
 	admin.Get("/secret", func(c *fiber.Ctx) error {
 		return c.SendString("handler reached")

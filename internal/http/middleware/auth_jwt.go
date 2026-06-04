@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/config"
+	"github.com/FauzanParanditha/portfolio-backend/internal/denylist"
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/handlers"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
@@ -11,7 +12,9 @@ import (
 )
 
 // AuthJWT mengembalikan middleware Fiber untuk verifikasi JWT.
-func AuthJWT(cfg *config.Config) fiber.Handler {
+// dl boleh nil (revocation dilewati); jika di-set, token yang jti-nya sudah
+// dicabut (mis. setelah logout) akan ditolak 401.
+func AuthJWT(cfg *config.Config, dl denylist.Denylist) fiber.Handler {
 	secret := []byte(cfg.JWTSecret)
 
 	return func(c *fiber.Ctx) error {
@@ -49,6 +52,11 @@ func AuthJWT(cfg *config.Config) fiber.Handler {
 		claims, ok := token.Claims.(*handlers.JWTCustomClaims)
 		if !ok || !token.Valid {
 			return fiber.NewError(fiber.StatusUnauthorized, "invalid token claims")
+		}
+
+		// Tolak token yang sudah dicabut (mis. setelah logout).
+		if dl != nil && dl.IsRevoked(claims.ID) {
+			return fiber.NewError(fiber.StatusUnauthorized, "token revoked")
 		}
 		// log.Info().
 		// 	Interface("claims", claims).

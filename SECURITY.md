@@ -23,6 +23,7 @@ Aturan berikut sudah ditegakkan dan diverifikasi. Setiap perubahan yang melangga
 9. **CORS** — origin dari env; `*` dilarang berbarengan dengan credentials (ditolak `config.Validate()`).
 10. **Secrets** — `.env` di-gitignore dan tidak boleh di-commit; gunakan `.env.example` sebagai template.
 11. **Cookie auth HttpOnly** — kredensial browser disimpan di cookie `access_token` dengan flag **`HttpOnly`** (tidak terbaca JS) dan `SameSite=Lax`; flag `Secure` wajib aktif di produksi (otomatis via `cfg.IsProduction()`). Jangan men-set cookie token tanpa `HttpOnly`, dan jangan mengekspos JWT ke storage JS-accessible.
+12. **Revocation saat logout** — setiap token punya `jti`; `POST /auth/logout` mencabut `jti` lewat denylist (`internal/denylist`) dan `AuthJWT` menolak token tercabut (`401 "token revoked"`). Jangan terbitkan token tanpa `jti`, dan jangan lepas pengecekan denylist di middleware.
 
 ---
 
@@ -53,7 +54,8 @@ Aturan berikut sudah ditegakkan dan diverifikasi. Setiap perubahan yang melangga
 | Middleware global (helmet, CORS, recover, logger) | `internal/http/middleware/middleware.go` |
 | Rate limit login | `internal/http/router.go` (`registerAuthRoutes`) |
 | Validasi config & fail-fast | `internal/config/config.go` (`Validate`, `IsProduction`) |
-| Hashing, login, logout & set/clear cookie HttpOnly | `internal/http/handlers/auth_handler.go` (`setAuthCookie`/`clearAuthCookie`, `Logout`) |
+| Hashing, login, logout, set/clear cookie HttpOnly & revoke token | `internal/http/handlers/auth_handler.go` (`setAuthCookie`/`clearAuthCookie`, `Logout`, `parseTokenForRevoke`) |
+| Denylist token (revocation berbasis jti) | `internal/denylist/denylist.go` |
 | Error handler terpusat | `internal/http/error_handler.go` |
 
 Test verifikasi otorisasi: `internal/http/middleware/require_role_test.go` (memastikan non-admin → 403, token salah-secret → 401). Jalankan:
@@ -90,7 +92,7 @@ Yang divalidasi: `JWT_SECRET` (tidak kosong, bukan default, ≥32 char) dan komb
 
 Belum ditangani, kandidat perbaikan berikutnya:
 
-- **Refresh token & revocation** — saat ini logout tidak instan; token valid sampai `exp`. Pertimbangkan refresh token + denylist, atau pindah ke RS256 (lihat ADR-003).
+- **Revocation durable / multi-instance** — denylist saat ini in-memory (ADR-011): hilang saat restart & tidak dibagi antar-instance. Untuk multi-instance, ganti implementasi `Denylist` dengan DB/Redis (drop-in via interface). Pindah ke RS256 (ADR-003) tetap opsi bila perlu rotasi kunci.
 - **Seeder mencetak password admin ke log** (`cmd/seed/main.go`) — hanya untuk dev; hilangkan/lindungi di produksi.
 - **Account lockout** — rate limit saat ini per-IP global pada login; belum ada lockout per-akun.
 - **Audit dependency** — jadwalkan `govulncheck ./...` secara berkala (belum terpasang di CI).

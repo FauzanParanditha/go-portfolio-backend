@@ -17,7 +17,8 @@ import (
 // jadi *gorm.DB nil aman.
 func TestLogoutClearsCookie(t *testing.T) {
 	cfg := &config.Config{JWTExpiresIn: 1800, AppEnv: "development"}
-	h := handlers.NewAuthHandler(nil, cfg)
+	// denylist nil: tanpa token di request, Logout tidak mencabut apa pun.
+	h := handlers.NewAuthHandler(nil, cfg, nil)
 
 	app := fiber.New()
 	app.Post("/auth/logout", h.Logout)

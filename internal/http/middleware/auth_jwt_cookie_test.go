@@ -16,7 +16,7 @@ import (
 func newAuthApp(cfg *config.Config) *fiber.App {
 	app := fiber.New()
 	g := app.Group("/protected")
-	g.Use(middleware.AuthJWT(cfg))
+	g.Use(middleware.AuthJWT(cfg, nil))
 	g.Get("/", func(c *fiber.Ctx) error {
 		role, _ := c.Locals("user_role").(string)
 		return c.SendString("ok:" + role)

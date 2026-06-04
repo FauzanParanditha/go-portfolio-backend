@@ -167,7 +167,7 @@ Endpoint list menerima query params:
 | ------ | --------------- | ---- | ---------- |
 | POST   | `/auth/login`   | —    | Login admin. **Rate-limited 10 req/menit** (`429` jika terlampaui). Set cookie `access_token` + body token |
 | POST   | `/auth/refresh` | JWT (header **atau** cookie) | Terbitkan token baru dari token valid yang sedang dipakai; set ulang cookie `access_token`. **Tidak** rate-limited. Stateless (tanpa DB/refresh-token store) |
-| POST   | `/auth/logout`  | —    | **Publik.** Hapus cookie `access_token` (set cookie kedaluwarsa). Tidak ada revocation server-side — token JWT lama tetap valid sampai `exp` |
+| POST   | `/auth/logout`  | —    | **Publik.** Hapus cookie `access_token` DAN **cabut token saat ini** (via `jti` → denylist) sehingga langsung tidak berlaku. Kirim token saat ini (header/cookie) agar tercabut |
 | GET    | `/me`           | JWT (header **atau** cookie) | Info user saat ini |
 
 `POST /auth/login`
@@ -182,10 +182,13 @@ Endpoint list menerima query params:
 
 `POST /auth/logout`
 ```json
-// request — tanpa body, tanpa auth (publik)
-// 200 — server mengirim header Set-Cookie yang mengosongkan access_token (Max-Age=0)
+// request — tanpa body; sertakan token saat ini (header Authorization atau cookie)
+//   agar token tsb DICABUT (jti masuk denylist), bukan sekadar hapus cookie
+// 200 — Set-Cookie mengosongkan access_token (Max-Age=0); token saat ini langsung tidak berlaku
 { "data": { "message": "logged out" } }
 ```
+
+> Revocation memakai `jti` + denylist in-memory (ADR-011): setelah logout, token yang sama → `401 "token revoked"`. Catatan: denylist hilang saat server restart & tidak dibagi antar-instance (single-instance OK; multi-instance perlu denylist DB/Redis).
 
 > Pesan error login sengaja generik (`invalid credentials`) untuk email salah maupun password salah — mencegah enumerasi user.
 
@@ -198,7 +201,7 @@ Endpoint list menerima query params:
 // 401 → token hilang/invalid/kedaluwarsa
 ```
 
-> Refresh memakai middleware `AuthJWT` yang sama (validasi HS256, enforce signing method, secret yang sama). Tidak ada revocation/rotation server-side; token lama tetap valid sampai `exp`-nya.
+> Refresh memakai middleware `AuthJWT` yang sama (validasi HS256, enforce signing method, secret yang sama) dan menerbitkan token baru dengan `jti` baru. Catatan: refresh **tidak** otomatis mencabut token lama — token sebelumnya tetap valid sampai `exp` atau sampai `logout` mencabutnya.
 
 ### Projects (publik)
 

@@ -3,13 +3,16 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/config"
+	"github.com/FauzanParanditha/portfolio-backend/internal/denylist"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/FauzanParanditha/portfolio-backend/internal/validation"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -18,12 +21,14 @@ import (
 type AuthHandler struct {
 	userRepo repository.UserRepository
 	cfg      *config.Config
+	denylist denylist.Denylist
 }
 
-func NewAuthHandler(db *gorm.DB, cfg *config.Config) *AuthHandler {
+func NewAuthHandler(db *gorm.DB, cfg *config.Config, dl denylist.Denylist) *AuthHandler {
 	return &AuthHandler{
 		userRepo: repository.NewUserRepository(db),
 		cfg:      cfg,
+		denylist: dl,
 	}
 }
 
@@ -155,6 +160,7 @@ func (h *AuthHandler) issueToken(userID, role string) (string, error) {
 		UserID: userID,
 		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.NewString(), // jti — dipakai untuk revocation saat logout
 			Subject:   userID,
 			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -204,12 +210,20 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 // POST /api/v1/auth/logout
 // Logout godoc
 // @Summary      Logout
-// @Description  Menghapus cookie HttpOnly `access_token` di sisi browser (set cookie kedaluwarsa). Bersifat PUBLIK (tanpa auth) agar user dengan token kedaluwarsa tetap bisa membersihkan cookie. Karena auth stateless, token JWT lama TETAP valid sampai `exp`-nya — tidak ada revocation server-side.
+// @Description  Menghapus cookie HttpOnly `access_token` di sisi browser DAN mencabut token saat ini (berdasarkan jti) lewat denylist sehingga token langsung tidak berlaku walau belum `exp`. Bersifat PUBLIK (tanpa middleware auth) agar user dengan token kedaluwarsa tetap bisa membersihkan cookie; token yang sudah invalid/kedaluwarsa cukup diabaikan.
 // @Tags         auth
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}
 // @Router       /auth/logout [post]
 func (h *AuthHandler) Logout(c *fiber.Ctx) error {
+	// Cabut token saat ini (jika valid) berdasarkan jti agar logout langsung
+	// mematikan token, tidak menunggu sampai exp.
+	if h.denylist != nil {
+		if jti, exp, ok := h.parseTokenForRevoke(c); ok {
+			h.denylist.Revoke(jti, exp)
+		}
+	}
+
 	h.clearAuthCookie(c)
 
 	return c.JSON(fiber.Map{
@@ -217,4 +231,35 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 			"message": "logged out",
 		},
 	})
+}
+
+// parseTokenForRevoke membaca token dari header Authorization ATAU cookie
+// `access_token`, mem-parse & memvalidasinya (HS256, secret yang sama), lalu
+// mengembalikan jti + exp. ok=false bila token tidak ada / tidak valid / tanpa jti
+// (tidak ada yang perlu dicabut).
+func (h *AuthHandler) parseTokenForRevoke(c *fiber.Ctx) (jti string, exp time.Time, ok bool) {
+	var tokenStr string
+	if authHeader := c.Get("Authorization"); authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			tokenStr = parts[1]
+		}
+	} else if cookie := c.Cookies(accessTokenCookieName); cookie != "" {
+		tokenStr = cookie
+	}
+	if tokenStr == "" {
+		return "", time.Time{}, false
+	}
+
+	claims := &JWTCustomClaims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return []byte(h.cfg.JWTSecret), nil
+	})
+	if err != nil || !token.Valid || claims.ID == "" || claims.ExpiresAt == nil {
+		return "", time.Time{}, false
+	}
+	return claims.ID, claims.ExpiresAt.Time, true
 }
