@@ -2,6 +2,8 @@ module github.com/FauzanParanditha/portfolio-backend
 
 go 1.25.0
 
+toolchain go1.26.4
+
 require (
 	github.com/rs/zerolog v1.35.0
 	github.com/swaggo/swag v1.16.6
