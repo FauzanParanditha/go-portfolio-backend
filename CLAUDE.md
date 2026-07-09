@@ -114,3 +114,41 @@ has `*_dto.go` files defining request structs with `validate:` tags; map DTO→m
 
 Swagger annotations live in handler comments; `make swagger` regenerates `docs/`. UI is served at `/swagger/*`
 only when not in production. Keep annotations in sync when changing endpoints.
+
+## Tim Agent & Orchestrasi
+
+Sesi utama berperan sebagai **PM/orchestrator**: pecah tugas, tentukan urutan, delegasikan ke subagent
+(`.claude/agents/`), lalu rakit hasilnya. Subagent tidak memanggil subagent lain — koordinasi terjadi di
+sesi utama.
+
+Ringkasan stack untuk konteks delegasi:
+- **Backend (repo ini):** Go 1.25 + Fiber v2 (fasthttp) + GORM (PostgreSQL) + Atlas migrations, auth JWT HS256.
+- **Frontend (repo terpisah `../portfolio-frontend`):** Next.js 16 App Router + React 19 + TypeScript + Tailwind, pnpm.
+- **Testing:** toolchain Go (`go test ./...`); utamakan test DB-free (`app.Test` + JWT). **Lint/format:** `make vet`, `make fmt`.
+- **Konvensi:** komentar & pesan log/error Bahasa Indonesia; commit konvensional (`feat`, `fix(security)`, dst).
+
+Panduan delegasi:
+- **architect** — dipanggil DULUAN untuk fitur besar/lintas-layer: rancang struktur & kontrak sebelum implementasi.
+- **backend-engineer** — implementasi API, logika server, database (handler/repository/model/migration).
+- **frontend-engineer** — pekerjaan UI/klien (di repo FE terpisah; koordinasi lintas-repo lewat `docs/`).
+- **qa-engineer** — setelah implementasi: tulis/jalankan test, reproduksi & verifikasi bug.
+- **code-reviewer** — sebelum merge: tinjau kualitas kode (read-only, melapor).
+- **security-auditor** — sebelum rilis / saat menyentuh auth/data sensitif: audit kerentanan (read-only, melapor).
+
+### Alur tipikal sebuah fitur
+1. **architect** merancang & memecah tugas + mendefinisikan kontrak API.
+2. **backend-engineer** (& **frontend-engineer** bila lintas-repo) implementasi.
+3. **qa-engineer** menulis & menjalankan test.
+4. **code-reviewer** meninjau kualitas.
+5. **security-auditor** mengaudit bila fitur sensitif.
+6. Sesi utama merangkum, pastikan Definition of Done terpenuhi, lalu siapkan untuk merge.
+
+### Definition of Done (global)
+- [ ] Lulus lint & format (`make vet`, `make fmt`).
+- [ ] Test relevan ada dan hijau (`go test ./...`).
+- [ ] Tidak ada rahasia ter-hardcode; `.env` tetap untracked.
+- [ ] Sudah di-review (code-reviewer) dan, bila sensitif, di-audit (security-auditor).
+- [ ] Dokumentasi/README/Swagger diperbarui bila perlu.
+
+> Catatan: `security-auditor` & `code-reviewer` sengaja **read-only** — mereka melaporkan temuan; perbaikan
+> dikerjakan engineer terkait.

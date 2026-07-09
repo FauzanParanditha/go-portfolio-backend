@@ -37,7 +37,9 @@ tmp/
 .DS_Store
 
 # Claude Code local config/settings (machine-specific)
-.claude/
+.claude/*
+# ...kecuali definisi subagent tim yang sengaja dibagikan ke repo
+!.claude/agents/
 
 # Catatan koordinasi antar-agent (internal, bukan untuk konsumsi publik)
 # File tetap ada di disk untuk koordinasi lokal, hanya tidak di-track git.
