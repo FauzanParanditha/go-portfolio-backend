@@ -71,10 +71,11 @@ func seedAdminUser(db *gorm.DB) error {
 		return err
 	}
 
+	// jangan pernah mencetak nilai password ke log untuk mencegah kebocoran kredensial.
+	// gunakan env SEED_ADMIN_PASSWORD untuk menentukan password saat seeding.
 	log.Info().
 		Str("email", email).
-		Str("password", password).
-		Msg("admin user created (PLEASE change password in production)")
+		Msg("admin user created (password diambil dari env SEED_ADMIN_PASSWORD, segera ganti setelah login pertama)")
 
 	return nil
 }
