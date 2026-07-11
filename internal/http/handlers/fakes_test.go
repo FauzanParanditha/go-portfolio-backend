@@ -2,9 +2,11 @@ package handlers_test
 
 import (
 	"context"
+	"time"
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
+	"github.com/google/uuid"
 )
 
 // File ini berisi fake repository (implementasi interface repository) yang
@@ -14,8 +16,13 @@ import (
 // --- fakeProjectRepo: implementasi repository.ProjectRepository ---
 
 type fakeProjectRepo struct {
-	listFn      func(ctx context.Context, params repository.ProjectListParams) ([]models.Project, int64, error)
-	getBySlugFn func(ctx context.Context, slug string) (*models.Project, error)
+	listFn         func(ctx context.Context, params repository.ProjectListParams) ([]models.Project, int64, error)
+	getBySlugFn    func(ctx context.Context, slug string) (*models.Project, error)
+	listAdminFn    func(ctx context.Context, params repository.ProjectAdminListParams) ([]models.Project, int64, error)
+	getByIDAdminFn func(ctx context.Context, id uuid.UUID) (*models.Project, error)
+	createFn       func(ctx context.Context, in repository.ProjectWriteInput) (*models.Project, error)
+	updateFn       func(ctx context.Context, id uuid.UUID, in repository.ProjectWriteInput) (*models.Project, error)
+	deleteFn       func(ctx context.Context, id uuid.UUID) error
 }
 
 func (f *fakeProjectRepo) ListPublic(ctx context.Context, params repository.ProjectListParams) ([]models.Project, int64, error) {
@@ -26,14 +33,59 @@ func (f *fakeProjectRepo) GetBySlug(ctx context.Context, slug string) (*models.P
 	return f.getBySlugFn(ctx, slug)
 }
 
+func (f *fakeProjectRepo) ListAdmin(ctx context.Context, params repository.ProjectAdminListParams) ([]models.Project, int64, error) {
+	return f.listAdminFn(ctx, params)
+}
+
+func (f *fakeProjectRepo) GetByIDAdmin(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return f.getByIDAdminFn(ctx, id)
+}
+
+func (f *fakeProjectRepo) Create(ctx context.Context, in repository.ProjectWriteInput) (*models.Project, error) {
+	return f.createFn(ctx, in)
+}
+
+func (f *fakeProjectRepo) Update(ctx context.Context, id uuid.UUID, in repository.ProjectWriteInput) (*models.Project, error) {
+	return f.updateFn(ctx, id, in)
+}
+
+func (f *fakeProjectRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	return f.deleteFn(ctx, id)
+}
+
 // --- fakeExperienceRepo: implementasi repository.ExperienceRepository ---
 
 type fakeExperienceRepo struct {
-	listFn func(ctx context.Context) ([]models.Experience, error)
+	listFn         func(ctx context.Context) ([]models.Experience, error)
+	listAdminFn    func(ctx context.Context, params repository.ExperienceAdminListParams) ([]models.Experience, int64, error)
+	getByIDAdminFn func(ctx context.Context, id uuid.UUID) (*models.Experience, error)
+	createFn       func(ctx context.Context, in repository.ExperienceWriteInput) (*models.Experience, error)
+	updateFn       func(ctx context.Context, id uuid.UUID, in repository.ExperienceWriteInput) (*models.Experience, error)
+	deleteFn       func(ctx context.Context, id uuid.UUID) error
 }
 
 func (f *fakeExperienceRepo) ListPublic(ctx context.Context) ([]models.Experience, error) {
 	return f.listFn(ctx)
+}
+
+func (f *fakeExperienceRepo) ListAdmin(ctx context.Context, params repository.ExperienceAdminListParams) ([]models.Experience, int64, error) {
+	return f.listAdminFn(ctx, params)
+}
+
+func (f *fakeExperienceRepo) GetByIDAdmin(ctx context.Context, id uuid.UUID) (*models.Experience, error) {
+	return f.getByIDAdminFn(ctx, id)
+}
+
+func (f *fakeExperienceRepo) Create(ctx context.Context, in repository.ExperienceWriteInput) (*models.Experience, error) {
+	return f.createFn(ctx, in)
+}
+
+func (f *fakeExperienceRepo) Update(ctx context.Context, id uuid.UUID, in repository.ExperienceWriteInput) (*models.Experience, error) {
+	return f.updateFn(ctx, id, in)
+}
+
+func (f *fakeExperienceRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	return f.deleteFn(ctx, id)
 }
 
 // --- fakeContactRepo: implementasi repository.ContactMessageRepository ---
@@ -96,10 +148,37 @@ func (f *fakeTagRepo) Delete(ctx context.Context, id string) error {
 	return f.deleteFn(ctx, id)
 }
 
+// --- fakeUserRepo: implementasi repository.UserRepository ---
+
+type fakeUserRepo struct {
+	findByEmailFn func(ctx context.Context, email string) (*models.User, error)
+	findByIDFn    func(ctx context.Context, id string) (*models.User, error)
+}
+
+func (f *fakeUserRepo) FindByEmail(ctx context.Context, email string) (*models.User, error) {
+	return f.findByEmailFn(ctx, email)
+}
+
+func (f *fakeUserRepo) FindByID(ctx context.Context, id string) (*models.User, error) {
+	return f.findByIDFn(ctx, id)
+}
+
+// --- fakeDashboardRepo: implementasi repository.DashboardRepository ---
+
+type fakeDashboardRepo struct {
+	overviewFn func(ctx context.Context, since time.Time) (repository.DashboardCounts, error)
+}
+
+func (f *fakeDashboardRepo) Overview(ctx context.Context, since time.Time) (repository.DashboardCounts, error) {
+	return f.overviewFn(ctx, since)
+}
+
 // Pastikan fake memenuhi kontrak interface pada waktu kompilasi.
 var (
 	_ repository.ProjectRepository        = (*fakeProjectRepo)(nil)
 	_ repository.ExperienceRepository     = (*fakeExperienceRepo)(nil)
 	_ repository.ContactMessageRepository = (*fakeContactRepo)(nil)
 	_ repository.TagRepository            = (*fakeTagRepo)(nil)
+	_ repository.UserRepository           = (*fakeUserRepo)(nil)
+	_ repository.DashboardRepository      = (*fakeDashboardRepo)(nil)
 )

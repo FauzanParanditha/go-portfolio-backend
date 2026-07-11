@@ -14,8 +14,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Catatan: AdminContactHandler menerima *gorm.DB opsional yang tidak dipakai
-// oleh method-method yang diuji (semuanya lewat repo), jadi aman lewatkan nil.
+// Catatan: AdminContactHandler kini hanya menerima repository (semua akses DB
+// lewat repo), jadi test cukup memakai fake repo tanpa database.
 // Invarian auth /admin/* diuji terpisah di require_role_test.go.
 
 // TestAdminContactListReturnsEnvelope memastikan GET list 200 dengan
@@ -32,7 +32,7 @@ func TestAdminContactListReturnsEnvelope(t *testing.T) {
 	}
 
 	app := newTestApp()
-	app.Get("/admin/contact-messages", handlers.NewAdminContactHandler(nil, repo).List)
+	app.Get("/admin/contact-messages", handlers.NewAdminContactHandler(repo).List)
 
 	status, body := doJSON(t, app, httptest.NewRequest(http.MethodGet, "/admin/contact-messages?isRead=true&q=budi", nil))
 	if status != http.StatusOK {
@@ -64,7 +64,7 @@ func TestAdminContactGetByIDFound(t *testing.T) {
 	}
 
 	app := newTestApp()
-	app.Get("/admin/contact-messages/:id", handlers.NewAdminContactHandler(nil, repo).GetByID)
+	app.Get("/admin/contact-messages/:id", handlers.NewAdminContactHandler(repo).GetByID)
 
 	status, body := doJSON(t, app, httptest.NewRequest(http.MethodGet, "/admin/contact-messages/"+id.String(), nil))
 	if status != http.StatusOK {
@@ -86,7 +86,7 @@ func TestAdminContactGetByIDInvalidUUID(t *testing.T) {
 	}
 
 	app := newTestApp()
-	app.Get("/admin/contact-messages/:id", handlers.NewAdminContactHandler(nil, repo).GetByID)
+	app.Get("/admin/contact-messages/:id", handlers.NewAdminContactHandler(repo).GetByID)
 
 	status, _ := doJSON(t, app, httptest.NewRequest(http.MethodGet, "/admin/contact-messages/bukan-uuid", nil))
 	if status != http.StatusBadRequest {
@@ -103,7 +103,7 @@ func TestAdminContactGetByIDNotFound(t *testing.T) {
 	}
 
 	app := newTestApp()
-	app.Get("/admin/contact-messages/:id", handlers.NewAdminContactHandler(nil, repo).GetByID)
+	app.Get("/admin/contact-messages/:id", handlers.NewAdminContactHandler(repo).GetByID)
 
 	status, body := doJSON(t, app, httptest.NewRequest(http.MethodGet, "/admin/contact-messages/"+uuid.New().String(), nil))
 	if status != http.StatusNotFound {
@@ -130,7 +130,7 @@ func TestAdminContactMarkReadValid(t *testing.T) {
 	}
 
 	app := newTestApp()
-	app.Patch("/admin/contact-messages/:id/read", handlers.NewAdminContactHandler(nil, repo).MarkRead)
+	app.Patch("/admin/contact-messages/:id/read", handlers.NewAdminContactHandler(repo).MarkRead)
 
 	status, body := doJSON(t, app, postJSON(http.MethodPatch, "/admin/contact-messages/"+id.String()+"/read", `{"isRead":true}`))
 	if status != http.StatusNoContent {
@@ -151,7 +151,7 @@ func TestAdminContactMarkReadInvalidUUID(t *testing.T) {
 	}
 
 	app := newTestApp()
-	app.Patch("/admin/contact-messages/:id/read", handlers.NewAdminContactHandler(nil, repo).MarkRead)
+	app.Patch("/admin/contact-messages/:id/read", handlers.NewAdminContactHandler(repo).MarkRead)
 
 	status, _ := doJSON(t, app, postJSON(http.MethodPatch, "/admin/contact-messages/bukan-uuid/read", `{"isRead":true}`))
 	if status != http.StatusBadRequest {
@@ -174,7 +174,7 @@ func TestAdminContactDeleteValid(t *testing.T) {
 	}
 
 	app := newTestApp()
-	app.Delete("/admin/contact-messages/:id", handlers.NewAdminContactHandler(nil, repo).Delete)
+	app.Delete("/admin/contact-messages/:id", handlers.NewAdminContactHandler(repo).Delete)
 
 	status, body := doJSON(t, app, httptest.NewRequest(http.MethodDelete, "/admin/contact-messages/"+id.String(), nil))
 	if status != http.StatusNoContent {
@@ -198,7 +198,7 @@ func TestAdminContactDeleteInvalidUUID(t *testing.T) {
 	}
 
 	app := newTestApp()
-	app.Delete("/admin/contact-messages/:id", handlers.NewAdminContactHandler(nil, repo).Delete)
+	app.Delete("/admin/contact-messages/:id", handlers.NewAdminContactHandler(repo).Delete)
 
 	status, _ := doJSON(t, app, httptest.NewRequest(http.MethodDelete, "/admin/contact-messages/bukan-uuid", nil))
 	if status != http.StatusBadRequest {

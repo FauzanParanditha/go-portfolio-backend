@@ -36,6 +36,17 @@ func doJSON(t *testing.T, app *fiber.App, req *http.Request) (int, []byte) {
 	return resp.StatusCode, body
 }
 
+// readAll membaca seluruh body (dipakai saat request dieksekusi langsung via
+// app.Test untuk memeriksa header seperti Set-Cookie sekaligus body-nya).
+func readAll(t *testing.T, r io.Reader) []byte {
+	t.Helper()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("gagal baca body: %v", err)
+	}
+	return b
+}
+
 // decode mengurai body JSON ke map generik untuk memeriksa bentuk envelope.
 func decode(t *testing.T, body []byte) map[string]any {
 	t.Helper()
