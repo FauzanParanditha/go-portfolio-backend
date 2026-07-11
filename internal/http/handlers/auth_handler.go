@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 type AuthHandler struct {
@@ -24,9 +23,9 @@ type AuthHandler struct {
 	denylist denylist.Denylist
 }
 
-func NewAuthHandler(db *gorm.DB, cfg *config.Config, dl denylist.Denylist) *AuthHandler {
+func NewAuthHandler(userRepo repository.UserRepository, cfg *config.Config, dl denylist.Denylist) *AuthHandler {
 	return &AuthHandler{
-		userRepo: repository.NewUserRepository(db),
+		userRepo: userRepo,
 		cfg:      cfg,
 		denylist: dl,
 	}

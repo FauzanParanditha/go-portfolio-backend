@@ -5,18 +5,17 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/FauzanParanditha/portfolio-backend/internal/models"
+	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog/log"
-	"gorm.io/gorm"
 )
 
 type MeHandler struct {
-	db *gorm.DB
+	userRepo repository.UserRepository
 }
 
-func NewMeHandler(db *gorm.DB) *MeHandler {
-	return &MeHandler{db: db}
+func NewMeHandler(userRepo repository.UserRepository) *MeHandler {
+	return &MeHandler{userRepo: userRepo}
 }
 
 type MeResponse struct {
@@ -52,8 +51,8 @@ func (h *MeHandler) Me(c *fiber.Ctx) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		var user models.User
-		if err := h.db.WithContext(ctx).First(&user, "id = ?", userID).Error; err != nil {
+		user, err := h.userRepo.FindByID(ctx, userID)
+		if err != nil {
 			log.Error().Err(err).Str("user_id", userID).Msg("failed to load current user")
 			return fiber.NewError(http.StatusInternalServerError, "failed to fetch user")
 		}

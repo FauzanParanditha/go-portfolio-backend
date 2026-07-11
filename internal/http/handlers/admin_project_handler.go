@@ -9,6 +9,7 @@ import (
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/response"
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
+	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/FauzanParanditha/portfolio-backend/internal/validation"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -31,11 +32,11 @@ type PaginationMeta struct {
 }
 
 type AdminProjectHandler struct {
-	db *gorm.DB
+	repo repository.ProjectRepository
 }
 
-func NewAdminProjectHandler(db *gorm.DB) *AdminProjectHandler {
-	return &AdminProjectHandler{db: db}
+func NewAdminProjectHandler(repo repository.ProjectRepository) *AdminProjectHandler {
+	return &AdminProjectHandler{repo: repo}
 }
 
 // Helper: kirim response error validasi
@@ -95,49 +96,17 @@ func (h *AdminProjectHandler) List(c *fiber.Ctx) error {
 	if limit > 100 {
 		limit = 100
 	}
-	offset := (page - 1) * limit
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	q := h.db.WithContext(ctx).
-		Preload("Features", func(db *gorm.DB) *gorm.DB {
-			return db.Order("project_features.sort_order ASC")
-		}).
-		Preload("Tags").
-		Preload("Screenshots", func(db *gorm.DB) *gorm.DB {
-			return db.Order("project_screenshots.sort_order ASC")
-		}).
-		Model(&models.Project{})
-
-	if searchQ != "" {
-		like := "%" + searchQ + "%"
-		q = q.Where(
-			h.db.Where("projects.title ILIKE ?", like).
-				Or("projects.short_desc ILIKE ?", like).
-				Or("projects.long_desc ILIKE ?", like).
-				Or("projects.category ILIKE ?", like),
-		)
-	}
-
-	if featured {
-		q = q.Where("projects.is_featured = ?", true)
-	}
-
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		log.Error().Err(err).Msg("failed to count projects (admin)")
-		return fiber.NewError(http.StatusInternalServerError, "failed to fetch projects")
-	}
-
-	var projects []models.Project
-	if err := q.
-		Order("projects.sort_order ASC").
-		Order("projects.created_at DESC").
-		Limit(limit).
-		Offset(offset).
-		Find(&projects).Error; err != nil {
-
+	projects, total, err := h.repo.ListAdmin(ctx, repository.ProjectAdminListParams{
+		Query:        searchQ,
+		FeaturedOnly: featured,
+		Page:         page,
+		Limit:        limit,
+	})
+	if err != nil {
 		log.Error().Err(err).Msg("failed to list projects (admin)")
 		return fiber.NewError(http.StatusInternalServerError, "failed to fetch projects")
 	}
@@ -185,17 +154,8 @@ func (h *AdminProjectHandler) GetByID(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var project models.Project
-	if err := h.db.WithContext(ctx).
-		Preload("Features", func(db *gorm.DB) *gorm.DB {
-			return db.Order("project_features.sort_order ASC")
-		}).
-		Preload("Tags").
-		Preload("Screenshots", func(db *gorm.DB) *gorm.DB {
-			return db.Order("project_screenshots.sort_order ASC")
-		}).
-		First(&project, "id = ?", id).Error; err != nil {
-
+	project, err := h.repo.GetByIDAdmin(ctx, id)
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return fiber.NewError(http.StatusNotFound, "project not found")
 		}
@@ -205,7 +165,7 @@ func (h *AdminProjectHandler) GetByID(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"data": projectToResponse(project),
+		"data": projectToResponse(*project),
 	})
 }
 
@@ -251,120 +211,46 @@ func (h *AdminProjectHandler) Create(c *fiber.Ctx) error {
 		}
 	}
 
-	tx := h.db.WithContext(ctx).Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
+	// Scalar dipetakan di handler; relasi (tags/features/screenshots) dikirim
+	// mentah ke repository yang menjalankan transaksi.
+	in := repository.ProjectWriteInput{
+		Project: models.Project{
+			Title:         req.Title,
+			Slug:          req.Slug,
+			ShortDesc:     req.ShortDesc,
+			LongDesc:      req.LongDesc,
+			CoverImageURL: req.CoverImageURL,
 
-	project := models.Project{
-		Title:         req.Title,
-		Slug:          req.Slug,
-		ShortDesc:     req.ShortDesc,
-		LongDesc:      req.LongDesc,
-		CoverImageURL: req.CoverImageURL,
+			Category: req.Category,
+			Timeline: req.Timeline,
+			Role:     req.Role,
 
-		Category: req.Category,
-		Timeline: req.Timeline,
-		Role:     req.Role,
+			Challenge: req.Challenge,
+			Solution:  req.Solution,
 
-		Challenge: req.Challenge,
-		Solution:  req.Solution,
+			Results: req.Results,
 
-		Results: req.Results,
+			TechnicalDetails: technicalDetails,
 
-		TechnicalDetails: technicalDetails,
+			DemoURL: req.DemoURL,
+			RepoURL: req.RepoURL,
 
-		DemoURL: req.DemoURL,
-		RepoURL: req.RepoURL,
-
-		IsFeatured: req.IsFeatured,
-		SortOrder:  req.SortOrder,
+			IsFeatured: req.IsFeatured,
+			SortOrder:  req.SortOrder,
+		},
+		TagIDs:      tagUUIDs,
+		Features:    req.Features,
+		Screenshots: req.Screenshots,
 	}
 
-	// Handle tags (many-to-many)
-	if len(tagUUIDs) > 0 {
-		var tags []models.Tag
-		if err := tx.Where("id IN ?", tagUUIDs).Find(&tags).Error; err != nil {
-			tx.Rollback()
-			log.Error().Err(err).Msg("failed to load tags for project create")
-			return fiber.NewError(http.StatusInternalServerError, "failed to load tags")
-		}
-		project.Tags = tags
-	}
-
-	if err := tx.Create(&project).Error; err != nil {
-		tx.Rollback()
+	project, err := h.repo.Create(ctx, in)
+	if err != nil {
 		log.Error().Err(err).Msg("failed to create project")
 		return fiber.NewError(http.StatusInternalServerError, "failed to create project")
 	}
 
-	// Features
-	if len(req.Features) > 0 {
-		features := make([]models.ProjectFeature, 0, len(req.Features))
-		for i, text := range req.Features {
-			if text == "" {
-				continue
-			}
-			features = append(features, models.ProjectFeature{
-				ProjectID: project.ID,
-				Text:      text,
-				SortOrder: i,
-			})
-		}
-		if len(features) > 0 {
-			if err := tx.Create(&features).Error; err != nil {
-				tx.Rollback()
-				log.Error().Err(err).Msg("failed to create project features")
-				return fiber.NewError(http.StatusInternalServerError, "failed to create project features")
-			}
-		}
-	}
-
-	// Screenshots
-	if len(req.Screenshots) > 0 {
-		screens := make([]models.ProjectScreenshot, 0, len(req.Screenshots))
-		for i, url := range req.Screenshots {
-			if url == "" {
-				continue
-			}
-			screens = append(screens, models.ProjectScreenshot{
-				ProjectID: project.ID,
-				ImageURL:  url,
-				SortOrder: i,
-			})
-		}
-		if len(screens) > 0 {
-			if err := tx.Create(&screens).Error; err != nil {
-				tx.Rollback()
-				log.Error().Err(err).Msg("failed to create project screenshots")
-				return fiber.NewError(http.StatusInternalServerError, "failed to create project screenshots")
-			}
-		}
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		log.Error().Err(err).Msg("failed to commit project create")
-		return fiber.NewError(http.StatusInternalServerError, "failed to create project")
-	}
-
-	// reload with relations
-	if err := h.db.WithContext(ctx).
-		Preload("Features", func(db *gorm.DB) *gorm.DB {
-			return db.Order("project_features.sort_order ASC")
-		}).
-		Preload("Tags").
-		Preload("Screenshots", func(db *gorm.DB) *gorm.DB {
-			return db.Order("project_screenshots.sort_order ASC")
-		}).
-		First(&project, "id = ?", project.ID).Error; err != nil {
-
-		log.Error().Err(err).Msg("failed to reload created project")
-	}
-
 	return c.Status(http.StatusCreated).JSON(fiber.Map{
-		"data": projectToResponse(project),
+		"data": projectToResponse(*project),
 	})
 }
 
@@ -415,154 +301,49 @@ func (h *AdminProjectHandler) Update(c *fiber.Ctx) error {
 		}
 	}
 
-	tx := h.db.WithContext(ctx).Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
+	// TechnicalDetails hanya dikirim non-nil bila body memuatnya; repository
+	// hanya menimpa kolom itu saat non-nil (mempertahankan JSON lama).
+	in := repository.ProjectWriteInput{
+		Project: models.Project{
+			Title:         req.Title,
+			Slug:          req.Slug,
+			ShortDesc:     req.ShortDesc,
+			LongDesc:      req.LongDesc,
+			CoverImageURL: req.CoverImageURL,
 
-	var project models.Project
-	if err := tx.First(&project, "id = ?", id).Error; err != nil {
+			Category: req.Category,
+			Timeline: req.Timeline,
+			Role:     req.Role,
+
+			Challenge: req.Challenge,
+			Solution:  req.Solution,
+
+			Results: req.Results,
+
+			TechnicalDetails: technicalDetails,
+
+			DemoURL: req.DemoURL,
+			RepoURL: req.RepoURL,
+
+			IsFeatured: req.IsFeatured,
+			SortOrder:  req.SortOrder,
+		},
+		TagIDs:      tagUUIDs,
+		Features:    req.Features,
+		Screenshots: req.Screenshots,
+	}
+
+	project, err := h.repo.Update(ctx, id, in)
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			tx.Rollback()
 			return fiber.NewError(http.StatusNotFound, "project not found")
 		}
-		tx.Rollback()
-		log.Error().Err(err).Str("id", idStr).Msg("failed to load project for update")
+		log.Error().Err(err).Str("id", idStr).Msg("failed to update project")
 		return fiber.NewError(http.StatusInternalServerError, "failed to update project")
-	}
-
-	// Update scalar fields
-	project.Title = req.Title
-	project.Slug = req.Slug
-	project.ShortDesc = req.ShortDesc
-	project.LongDesc = req.LongDesc
-	project.CoverImageURL = req.CoverImageURL
-
-	project.Category = req.Category
-	project.Timeline = req.Timeline
-	project.Role = req.Role
-
-	project.Challenge = req.Challenge
-	project.Solution = req.Solution
-
-	project.Results = req.Results
-
-	if technicalDetails != nil {
-		project.TechnicalDetails = technicalDetails
-	}
-
-	project.DemoURL = req.DemoURL
-	project.RepoURL = req.RepoURL
-	project.IsFeatured = req.IsFeatured
-	project.SortOrder = req.SortOrder
-
-	if err := tx.Save(&project).Error; err != nil {
-		tx.Rollback()
-		log.Error().Err(err).Msg("failed to update project")
-		return fiber.NewError(http.StatusInternalServerError, "failed to update project")
-	}
-
-	// Update tags
-	if len(tagUUIDs) > 0 {
-		var tags []models.Tag
-		if err := tx.Where("id IN ?", tagUUIDs).Find(&tags).Error; err != nil {
-			tx.Rollback()
-			log.Error().Err(err).Msg("failed to load tags for project update")
-			return fiber.NewError(http.StatusInternalServerError, "failed to update tags")
-		}
-		if err := tx.Model(&project).Association("Tags").Replace(&tags); err != nil {
-			tx.Rollback()
-			log.Error().Err(err).Msg("failed to update project tags")
-			return fiber.NewError(http.StatusInternalServerError, "failed to update tags")
-		}
-	} else {
-		// kalau tagIds kosong → kosongkan relasi
-		if err := tx.Model(&project).Association("Tags").Clear(); err != nil {
-			tx.Rollback()
-			log.Error().Err(err).Msg("failed to clear project tags")
-			return fiber.NewError(http.StatusInternalServerError, "failed to update tags")
-		}
-	}
-
-	// Update features: hapus dulu, lalu insert baru
-	if err := tx.Where("project_id = ?", project.ID).Delete(&models.ProjectFeature{}).Error; err != nil {
-		tx.Rollback()
-		log.Error().Err(err).Msg("failed to delete old project features")
-		return fiber.NewError(http.StatusInternalServerError, "failed to update features")
-	}
-
-	if len(req.Features) > 0 {
-		features := make([]models.ProjectFeature, 0, len(req.Features))
-		for i, text := range req.Features {
-			if text == "" {
-				continue
-			}
-			features = append(features, models.ProjectFeature{
-				ProjectID: project.ID,
-				Text:      text,
-				SortOrder: i,
-			})
-		}
-		if len(features) > 0 {
-			if err := tx.Create(&features).Error; err != nil {
-				tx.Rollback()
-				log.Error().Err(err).Msg("failed to create new project features")
-				return fiber.NewError(http.StatusInternalServerError, "failed to update features")
-			}
-		}
-	}
-
-	// Update screenshots: hapus dulu, buat ulang
-	if err := tx.Where("project_id = ?", project.ID).Delete(&models.ProjectScreenshot{}).Error; err != nil {
-		tx.Rollback()
-		log.Error().Err(err).Msg("failed to delete old project screenshots")
-		return fiber.NewError(http.StatusInternalServerError, "failed to update screenshots")
-	}
-
-	if len(req.Screenshots) > 0 {
-		screens := make([]models.ProjectScreenshot, 0, len(req.Screenshots))
-		for i, url := range req.Screenshots {
-			if url == "" {
-				continue
-			}
-			screens = append(screens, models.ProjectScreenshot{
-				ProjectID: project.ID,
-				ImageURL:  url,
-				SortOrder: i,
-			})
-		}
-		if len(screens) > 0 {
-			if err := tx.Create(&screens).Error; err != nil {
-				tx.Rollback()
-				log.Error().Err(err).Msg("failed to create new project screenshots")
-				return fiber.NewError(http.StatusInternalServerError, "failed to update screenshots")
-			}
-		}
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		log.Error().Err(err).Msg("failed to commit project update")
-		return fiber.NewError(http.StatusInternalServerError, "failed to update project")
-	}
-
-	// reload
-	if err := h.db.WithContext(ctx).
-		Preload("Features", func(db *gorm.DB) *gorm.DB {
-			return db.Order("project_features.sort_order ASC")
-		}).
-		Preload("Tags").
-		Preload("Screenshots", func(db *gorm.DB) *gorm.DB {
-			return db.Order("project_screenshots.sort_order ASC")
-		}).
-		First(&project, "id = ?", project.ID).Error; err != nil {
-
-		log.Error().Err(err).Msg("failed to reload updated project")
 	}
 
 	return c.JSON(fiber.Map{
-		"data": projectToResponse(project),
+		"data": projectToResponse(*project),
 	})
 }
 
@@ -585,10 +366,7 @@ func (h *AdminProjectHandler) Delete(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := h.db.WithContext(ctx).
-		Where("id = ?", id).
-		Delete(&models.Project{}).Error; err != nil {
-
+	if err := h.repo.Delete(ctx, id); err != nil {
 		log.Error().Err(err).Str("id", idStr).Msg("failed to delete project")
 		return fiber.NewError(http.StatusInternalServerError, "failed to delete project")
 	}

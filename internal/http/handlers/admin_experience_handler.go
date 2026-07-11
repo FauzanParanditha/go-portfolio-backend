@@ -9,6 +9,7 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/helpers"
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/response"
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
+	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/FauzanParanditha/portfolio-backend/internal/validation"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -17,11 +18,11 @@ import (
 )
 
 type AdminExperienceHandler struct {
-	db *gorm.DB
+	repo repository.ExperienceRepository
 }
 
-func NewAdminExperienceHandler(db *gorm.DB) *AdminExperienceHandler {
-	return &AdminExperienceHandler{db: db}
+func NewAdminExperienceHandler(repo repository.ExperienceRepository) *AdminExperienceHandler {
+	return &AdminExperienceHandler{repo: repo}
 }
 
 // GET /api/v1/admin/experiences
@@ -48,40 +49,16 @@ func (h *AdminExperienceHandler) List(c *fiber.Ctx) error {
 	if limit > 100 {
 		limit = 100
 	}
-	offset := (page - 1) * limit
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	qb := h.db.WithContext(ctx).
-		Preload("Highlights", func(db *gorm.DB) *gorm.DB {
-			return db.Order("experience_highlights.sort_order ASC")
-		}).
-		Preload("Tags").
-		Model(&models.Experience{})
-
-	if q != "" {
-		like := "%" + q + "%"
-		qb = qb.Where(
-			h.db.Where("experiences.title ILIKE ?", like).
-				Or("experiences.company ILIKE ?", like),
-		)
-	}
-
-	var total int64
-	if err := qb.Count(&total).Error; err != nil {
-		log.Error().Err(err).Msg("failed to count experiences (admin)")
-		return fiber.NewError(http.StatusInternalServerError, "failed to fetch experiences")
-	}
-
-	var exps []models.Experience
-	if err := qb.
-		Order("experiences.sort_order ASC").
-		Order("experiences.start_date DESC").
-		Limit(limit).
-		Offset(offset).
-		Find(&exps).Error; err != nil {
-
+	exps, total, err := h.repo.ListAdmin(ctx, repository.ExperienceAdminListParams{
+		Query: q,
+		Page:  page,
+		Limit: limit,
+	})
+	if err != nil {
 		log.Error().Err(err).Msg("failed to list experiences (admin)")
 		return fiber.NewError(http.StatusInternalServerError, "failed to fetch experiences")
 	}
@@ -126,14 +103,8 @@ func (h *AdminExperienceHandler) GetByID(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var exp models.Experience
-	if err := h.db.WithContext(ctx).
-		Preload("Highlights", func(db *gorm.DB) *gorm.DB {
-			return db.Order("experience_highlights.sort_order ASC")
-		}).
-		Preload("Tags").
-		First(&exp, "id = ?", id).Error; err != nil {
-
+	exp, err := h.repo.GetByIDAdmin(ctx, id)
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return fiber.NewError(http.StatusNotFound, "experience not found")
 		}
@@ -143,7 +114,7 @@ func (h *AdminExperienceHandler) GetByID(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"data": experienceToResponse(exp),
+		"data": experienceToResponse(*exp),
 	})
 }
 
@@ -194,81 +165,29 @@ func (h *AdminExperienceHandler) Create(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	tx := h.db.WithContext(ctx).Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	exp := models.Experience{
-		Title:       req.Title,
-		Company:     req.Company,
-		Location:    req.Location,
-		StartDate:   startDate,
-		EndDate:     endDate,
-		IsCurrent:   req.IsCurrent,
-		Description: req.Description,
-		SortOrder:   req.SortOrder,
+	in := repository.ExperienceWriteInput{
+		Experience: models.Experience{
+			Title:       req.Title,
+			Company:     req.Company,
+			Location:    req.Location,
+			StartDate:   startDate,
+			EndDate:     endDate,
+			IsCurrent:   req.IsCurrent,
+			Description: req.Description,
+			SortOrder:   req.SortOrder,
+		},
+		TagIDs:     tagUUIDs,
+		Highlights: req.Highlights,
 	}
 
-	// Tags
-	if len(tagUUIDs) > 0 {
-		var tags []models.Tag
-		if err := tx.Where("id IN ?", tagUUIDs).Find(&tags).Error; err != nil {
-			tx.Rollback()
-			log.Error().Err(err).Msg("failed to load tags for experience create")
-			return fiber.NewError(http.StatusInternalServerError, "failed to load tags")
-		}
-		exp.Tags = tags
-	}
-
-	if err := tx.Create(&exp).Error; err != nil {
-		tx.Rollback()
+	exp, err := h.repo.Create(ctx, in)
+	if err != nil {
 		log.Error().Err(err).Msg("failed to create experience")
 		return fiber.NewError(http.StatusInternalServerError, "failed to create experience")
 	}
 
-	// Highlights
-	if len(req.Highlights) > 0 {
-		highs := make([]models.ExperienceHighlight, 0, len(req.Highlights))
-		for i, text := range req.Highlights {
-			if text == "" {
-				continue
-			}
-			highs = append(highs, models.ExperienceHighlight{
-				ExperienceID: exp.ID,
-				Text:         text,
-				SortOrder:    i,
-			})
-		}
-		if len(highs) > 0 {
-			if err := tx.Create(&highs).Error; err != nil {
-				tx.Rollback()
-				log.Error().Err(err).Msg("failed to create experience highlights")
-				return fiber.NewError(http.StatusInternalServerError, "failed to create experience highlights")
-			}
-		}
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		log.Error().Err(err).Msg("failed to commit experience create")
-		return fiber.NewError(http.StatusInternalServerError, "failed to create experience")
-	}
-
-	// reload
-	if err := h.db.WithContext(ctx).
-		Preload("Highlights", func(db *gorm.DB) *gorm.DB {
-			return db.Order("experience_highlights.sort_order ASC")
-		}).
-		Preload("Tags").
-		First(&exp, "id = ?", exp.ID).Error; err != nil {
-
-		log.Error().Err(err).Msg("failed to reload created experience")
-	}
-
 	return c.Status(http.StatusCreated).JSON(fiber.Map{
-		"data": experienceToResponse(exp),
+		"data": experienceToResponse(*exp),
 	})
 }
 
@@ -326,107 +245,32 @@ func (h *AdminExperienceHandler) Update(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	tx := h.db.WithContext(ctx).Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	var exp models.Experience
-	if err := tx.First(&exp, "id = ?", id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			tx.Rollback()
-			return fiber.NewError(http.StatusNotFound, "experience not found")
-		}
-		tx.Rollback()
-		log.Error().Err(err).Str("id", idStr).Msg("failed to load experience for update")
-		return fiber.NewError(http.StatusInternalServerError, "failed to update experience")
+	in := repository.ExperienceWriteInput{
+		Experience: models.Experience{
+			Title:       req.Title,
+			Company:     req.Company,
+			Location:    req.Location,
+			StartDate:   startDate,
+			EndDate:     endDate,
+			IsCurrent:   req.IsCurrent,
+			Description: req.Description,
+			SortOrder:   req.SortOrder,
+		},
+		TagIDs:     tagUUIDs,
+		Highlights: req.Highlights,
 	}
 
-	// update fields
-	exp.Title = req.Title
-	exp.Company = req.Company
-	exp.Location = req.Location
-	exp.StartDate = startDate
-	exp.EndDate = endDate
-	exp.IsCurrent = req.IsCurrent
-	exp.Description = req.Description
-	exp.SortOrder = req.SortOrder
-
-	if err := tx.Save(&exp).Error; err != nil {
-		tx.Rollback()
+	exp, err := h.repo.Update(ctx, id, in)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return fiber.NewError(http.StatusNotFound, "experience not found")
+		}
 		log.Error().Err(err).Msg("failed to update experience")
 		return fiber.NewError(http.StatusInternalServerError, "failed to update experience")
 	}
 
-	// update tags
-	if len(tagUUIDs) > 0 {
-		var tags []models.Tag
-		if err := tx.Where("id IN ?", tagUUIDs).Find(&tags).Error; err != nil {
-			tx.Rollback()
-			log.Error().Err(err).Msg("failed to load tags for experience update")
-			return fiber.NewError(http.StatusInternalServerError, "failed to update tags")
-		}
-		if err := tx.Model(&exp).Association("Tags").Replace(&tags); err != nil {
-			tx.Rollback()
-			log.Error().Err(err).Msg("failed to update experience tags")
-			return fiber.NewError(http.StatusInternalServerError, "failed to update tags")
-		}
-	} else {
-		if err := tx.Model(&exp).Association("Tags").Clear(); err != nil {
-			tx.Rollback()
-			log.Error().Err(err).Msg("failed to clear experience tags")
-			return fiber.NewError(http.StatusInternalServerError, "failed to update tags")
-		}
-	}
-
-	// update highlights: delete + reinsert
-	if err := tx.Where("experience_id = ?", exp.ID).Delete(&models.ExperienceHighlight{}).Error; err != nil {
-		tx.Rollback()
-		log.Error().Err(err).Msg("failed to delete old experience highlights")
-		return fiber.NewError(http.StatusInternalServerError, "failed to update highlights")
-	}
-
-	if len(req.Highlights) > 0 {
-		highs := make([]models.ExperienceHighlight, 0, len(req.Highlights))
-		for i, text := range req.Highlights {
-			if text == "" {
-				continue
-			}
-			highs = append(highs, models.ExperienceHighlight{
-				ExperienceID: exp.ID,
-				Text:         text,
-				SortOrder:    i,
-			})
-		}
-		if len(highs) > 0 {
-			if err := tx.Create(&highs).Error; err != nil {
-				tx.Rollback()
-				log.Error().Err(err).Msg("failed to create new experience highlights")
-				return fiber.NewError(http.StatusInternalServerError, "failed to update highlights")
-			}
-		}
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		log.Error().Err(err).Msg("failed to commit experience update")
-		return fiber.NewError(http.StatusInternalServerError, "failed to update experience")
-	}
-
-	// reload
-	if err := h.db.WithContext(ctx).
-		Preload("Highlights", func(db *gorm.DB) *gorm.DB {
-			return db.Order("experience_highlights.sort_order ASC")
-		}).
-		Preload("Tags").
-		First(&exp, "id = ?", exp.ID).Error; err != nil {
-
-		log.Error().Err(err).Msg("failed to reload updated experience")
-	}
-
 	return c.JSON(fiber.Map{
-		"data": experienceToResponse(exp),
+		"data": experienceToResponse(*exp),
 	})
 }
 
@@ -448,10 +292,7 @@ func (h *AdminExperienceHandler) Delete(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := h.db.WithContext(ctx).
-		Where("id = ?", id).
-		Delete(&models.Experience{}).Error; err != nil {
-
+	if err := h.repo.Delete(ctx, id); err != nil {
 		log.Error().Err(err).Str("id", idStr).Msg("failed to delete experience")
 		return fiber.NewError(http.StatusInternalServerError, "failed to delete experience")
 	}

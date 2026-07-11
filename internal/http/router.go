@@ -104,7 +104,8 @@ func registerPublicProjectRoutes(app *fiber.App, deps AppDeps) {
 func registerAuthRoutes(app *fiber.App, deps AppDeps) {
 	api := app.Group("/api/v1")
 
-	authHandler := handlers.NewAuthHandler(deps.DB, deps.Config, deps.Denylist)
+	userRepo := repository.NewUserRepository(deps.DB)
+	authHandler := handlers.NewAuthHandler(userRepo, deps.Config, deps.Denylist)
 
 	// Rate limit untuk mencegah brute-force / credential stuffing pada login.
 	loginLimiter := limiter.New(limiter.Config{
@@ -134,7 +135,8 @@ func registerAdminProjectRoutes(app *fiber.App, deps AppDeps) {
 	admin.Use(middleware.AuthJWT(deps.Config, deps.Denylist))
 	admin.Use(middleware.RequireRole("admin"))
 
-	adminProjectHandler := handlers.NewAdminProjectHandler(deps.DB)
+	projectRepo := repository.NewProjectRepository(deps.DB)
+	adminProjectHandler := handlers.NewAdminProjectHandler(projectRepo)
 
 	p := admin.Group("/projects")
 	p.Get("/", adminProjectHandler.List)
@@ -181,7 +183,8 @@ func registerAdminExperienceRoutes(app *fiber.App, deps AppDeps) {
 	admin.Use(middleware.AuthJWT(deps.Config, deps.Denylist))
 	admin.Use(middleware.RequireRole("admin"))
 
-	handler := handlers.NewAdminExperienceHandler(deps.DB)
+	expRepo := repository.NewExperienceRepository(deps.DB)
+	handler := handlers.NewAdminExperienceHandler(expRepo)
 
 	e := admin.Group("/experiences")
 	e.Get("/", handler.List)
@@ -213,7 +216,7 @@ func registerAdminContactRoutes(app *fiber.App, deps AppDeps) {
 	admin.Use(middleware.RequireRole("admin"))
 
 	contactRepo := repository.NewContactMessageRepository(deps.DB)
-	contactHandler := handlers.NewAdminContactHandler(deps.DB, contactRepo)
+	contactHandler := handlers.NewAdminContactHandler(contactRepo)
 
 	g := admin.Group("/contact-messages")
 	g.Get("/", contactHandler.List)
@@ -225,7 +228,8 @@ func registerAdminContactRoutes(app *fiber.App, deps AppDeps) {
 func registerAuthMeRoutes(app *fiber.App, deps AppDeps) {
 	api := app.Group("/api/v1")
 
-	meHandler := handlers.NewMeHandler(deps.DB)
+	userRepo := repository.NewUserRepository(deps.DB)
+	meHandler := handlers.NewMeHandler(userRepo)
 
 	// wajib auth
 	api.Get("/me", middleware.AuthJWT(deps.Config, deps.Denylist), meHandler.Me)
@@ -238,6 +242,7 @@ func registerAdminDasbboardRoute(app *fiber.App, deps AppDeps) {
 	admin.Use(middleware.AuthJWT(deps.Config, deps.Denylist))
 	admin.Use(middleware.RequireRole("admin"))
 
-	dashboardHandler := handlers.NewAdminDashboardHandler(deps.DB)
+	dashboardRepo := repository.NewDashboardRepository(deps.DB)
+	dashboardHandler := handlers.NewAdminDashboardHandler(dashboardRepo)
 	admin.Get("/dashboard/overview", dashboardHandler.Overview)
 }

@@ -1,62 +1,52 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
+	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/gofiber/fiber/v2"
-	"gorm.io/gorm"
+	"github.com/rs/zerolog/log"
 )
 
 type AdminDashboardHandler struct {
-	db *gorm.DB
+	repo repository.DashboardRepository
 }
 
-func NewAdminDashboardHandler(db *gorm.DB) *AdminDashboardHandler {
-	return &AdminDashboardHandler{db: db}
+func NewAdminDashboardHandler(repo repository.DashboardRepository) *AdminDashboardHandler {
+	return &AdminDashboardHandler{repo: repo}
 }
 
 func (h *AdminDashboardHandler) Overview(c *fiber.Ctx) error {
 	recentDays := 30
 	since := time.Now().AddDate(0, 0, -recentDays)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	counts, err := h.repo.Overview(ctx, since)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to load dashboard overview")
+		return fiber.NewError(http.StatusInternalServerError, "failed to load dashboard overview")
+	}
+
 	var resp models.DashboardOverviewResponse
 	resp.System.ServerTime = time.Now()
 	resp.System.RecentDays = recentDays
 
-	// ===== Projects =====
-	if err := h.db.Model(&models.Project{}).Count(&resp.Projects.Total).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"message": "failed to count projects"})
-	}
-	if err := h.db.Model(&models.Project{}).Where("is_featured = ?", true).Count(&resp.Projects.Featured).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"message": "failed to count featured projects"})
-	}
-	if err := h.db.Model(&models.Project{}).Where("created_at >= ?", since).Count(&resp.Projects.RecentCount).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"message": "failed to count recent projects"})
-	}
+	resp.Projects.Total = counts.ProjectsTotal
+	resp.Projects.Featured = counts.ProjectsFeatured
+	resp.Projects.RecentCount = counts.ProjectsRecent
 
-	// ===== Experiences =====
-	if err := h.db.Model(&models.Experience{}).Count(&resp.Experiences.Total).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"message": "failed to count experiences"})
-	}
-	if err := h.db.Model(&models.Experience{}).Where("is_current = ?", true).Count(&resp.Experiences.Current).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"message": "failed to count current experiences"})
-	}
-	if err := h.db.Model(&models.Experience{}).Where("created_at >= ?", since).Count(&resp.Experiences.RecentCount).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"message": "failed to count recent experiences"})
-	}
+	resp.Experiences.Total = counts.ExperiencesTotal
+	resp.Experiences.Current = counts.ExperiencesCurrent
+	resp.Experiences.RecentCount = counts.ExperiencesRecent
 
-	// ===== Contact Messages =====
-	if err := h.db.Model(&models.ContactMessage{}).Count(&resp.ContactMessages.Total).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"message": "failed to count contact messages"})
-	}
-	if err := h.db.Model(&models.ContactMessage{}).Where("is_read = ?", false).Count(&resp.ContactMessages.Unread).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"message": "failed to count unread messages"})
-	}
-	if err := h.db.Model(&models.ContactMessage{}).Where("created_at >= ?", since).Count(&resp.ContactMessages.RecentCount).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"message": "failed to count recent messages"})
-	}
+	resp.ContactMessages.Total = counts.ContactTotal
+	resp.ContactMessages.Unread = counts.ContactUnread
+	resp.ContactMessages.RecentCount = counts.ContactRecent
 
 	return c.Status(http.StatusOK).JSON(fiber.Map{"data": resp})
 }

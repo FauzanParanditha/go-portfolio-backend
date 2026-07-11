@@ -12,18 +12,15 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
-	"gorm.io/gorm"
 )
 
 type AdminContactHandler struct {
 	repo repository.ContactMessageRepository
-	db   *gorm.DB // opsional, tapi aku keep konsisten dengan handler lain yang pakai db
 }
 
-func NewAdminContactHandler(db *gorm.DB, repo repository.ContactMessageRepository) *AdminContactHandler {
+func NewAdminContactHandler(repo repository.ContactMessageRepository) *AdminContactHandler {
 	return &AdminContactHandler{
 		repo: repo,
-		db:   db,
 	}
 }
 
