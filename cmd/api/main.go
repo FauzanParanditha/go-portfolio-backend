@@ -5,6 +5,7 @@ import (
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/config"
 	"github.com/FauzanParanditha/portfolio-backend/internal/db"
+	"github.com/FauzanParanditha/portfolio-backend/internal/denylist"
 	"github.com/FauzanParanditha/portfolio-backend/internal/logger"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
@@ -46,9 +47,14 @@ func main() {
 
 	gormDB := db.New(cfg)
 
+	// Denylist token persisten berbasis Postgres agar revocation (logout) tetap
+	// berlaku setelah proses restart — menggantikan default in-memory.
+	dl := denylist.NewPostgres(gormDB)
+
 	app := httprouter.NewRouter(httprouter.AppDeps{
-		DB:     gormDB,
-		Config: cfg,
+		DB:       gormDB,
+		Config:   cfg,
+		Denylist: dl,
 	})
 
 	addr := fmt.Sprintf(":%s", cfg.AppPort)
