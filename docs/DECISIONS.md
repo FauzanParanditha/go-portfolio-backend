@@ -170,6 +170,61 @@ Format: `ADR-NNN | Judul | Status | Tanggal`. Status: `Accepted`, `Superseded`, 
 
 ---
 
+## ADR-012 | Denylist token dipersisten ke PostgreSQL | Accepted | 2026-07
+
+**Konteks.** ADR-011 memakai denylist in-memory dan sudah mencatat keterbatasannya: pencabutan hilang saat proses restart dan tidak dibagi antar-instance. Logout yang "batal" setelah deploy ulang bukan perilaku yang bisa diterima untuk sesi admin.
+
+**Keputusan.** Menambah implementasi `denylist.Postgres` di belakang interface `Denylist` yang sudah ada (jalur upgrade yang memang diantisipasi ADR-011).
+- Tabel `revoked_tokens (jti PK, exp, created_at)` lewat migration Atlas; `Revoke` memakai upsert sehingga idempoten.
+- Janitor periodik menghapus baris yang sudah lewat `exp`.
+- `IsRevoked` **fail-open** saat DB error/timeout: cek ini berjalan di jalur panas setiap request terautentikasi, sehingga fail-closed akan mengubah satu gangguan DB menjadi penolakan seluruh request auth (DoS). Timeout singkat dipasang agar DB yang hang tidak menahan request.
+
+**Konsekuensi.**
+- Pencabutan token bertahan lintas restart dan berlaku untuk semua instance yang berbagi database.
+- Trade-off fail-open disengaja: saat DB bermasalah, token yang sudah dicabut bisa sesaat kembali diterima. Ketersediaan dipilih di atas kekakuan revocation.
+- Catatan ADR-011 dan dokumen yang menyebut denylist "in-memory / hilang saat restart" diperbarui oleh ADR ini.
+
+*(Entri ini didokumentasikan menyusul untuk implementasi yang sudah ada di kode.)*
+
+---
+
+## ADR-013 | Atribut cookie sesi dikonfigurasi lewat env (dukungan lintas-domain) | Accepted | 2026-09
+
+**Konteks.** ADR-010 memasang cookie `access_token` dengan `SameSite=Lax` dan `Secure` yang dipatok ke `IsProduction()` — nilai tetap di kode. Caveat ADR-010 sendiri sudah menyebut deployment cross-site butuh `SameSite=None; Secure`, tapi tidak ada cara mengubahnya tanpa menyentuh kode. Rencana memisahkan FE dan BE ke domain berbeda membuat batas ini menghalangi.
+
+**Keputusan.** Tiga atribut cookie diangkat ke konfigurasi: `COOKIE_DOMAIN`, `COOKIE_SAMESITE`, `COOKIE_SECURE`.
+- Default menjaga perilaku lama: `SameSite=Lax`, domain kosong (host-only), `Secure` mengikuti `APP_ENV`.
+- `setAuthCookie` dan `clearAuthCookie` memakai nilai yang **identik** — browser hanya menimpa cookie bila Domain/Path/SameSite/Secure cocok, jadi beda sedikit saja membuat logout gagal menghapus cookie.
+- `cfg.Validate()` menolak kombinasi yang pasti gagal: `SameSite=None` tanpa `Secure`, `SameSite=None` tanpa `CORS_ALLOW_CREDENTIALS`, dan produksi tanpa `Secure`.
+- Topologi deploy beserta matriks env didokumentasikan di `docs/DEPLOYMENT.md`.
+
+**Konsekuensi.**
+- Deployment same-site (termasuk **subdomain satu domain induk**, yang menurut browser tetap same-site) dan reverse-proxy satu-origin berjalan tanpa perubahan konfigurasi.
+- Salah konfigurasi lintas-domain gagal saat **startup** dengan pesan jelas, bukan sebagai "login yang tidak menempel" di browser.
+- Gate presence-check di frontend (`src/proxy.ts`) hanya bisa melihat cookie yang terkirim ke domain frontend. Untuk topologi di mana cookie tidak sampai ke sana, gate dimatikan lewat `ADMIN_PROXY_GATE=off`; keamanan tetap ditegakkan `RequireRole` di backend.
+- `SameSite=None` bergantung pada cookie pihak ketiga yang diblokir Safari dan dipartisi Firefox — karena itu topologi beda-domain-induk didokumentasikan sebagai **tidak disarankan**, bukan sekadar didukung.
+
+---
+
+## ADR-014 | Reset password lewat token sekali pakai + email | Accepted | 2026-09
+
+**Konteks.** Halaman login sudah menautkan "Forgot Password?" padahal tidak ada halaman maupun endpointnya. Satu-satunya cara memulihkan akun adalah menjalankan ulang seeder.
+
+**Keputusan.** Alur dua endpoint publik: `POST /auth/forgot-password` dan `POST /auth/reset-password`.
+- Token acak 256-bit dikirim lewat tautan email; **hanya SHA-256-nya** yang disimpan di tabel `password_reset_tokens`. SHA-256 (bukan bcrypt) memadai karena tokennya sendiri sudah tak bisa ditebak — key stretching tidak menambah apa pun.
+- Sekali pakai + kedaluwarsa (`PASSWORD_RESET_TTL`, default 1 jam). Menerbitkan token baru membatalkan token lama milik user yang sama, dan reset sukses membatalkan sisanya.
+- `forgot-password` **selalu** membalas `200` dengan pesan identik, termasuk saat email tak terdaftar atau pengiriman email gagal — membedakannya akan menjadikan endpoint ini oracle enumerasi user. Kegagalan kirim terlihat operator lewat log.
+- Paket `internal/mailer` di belakang interface: SMTP (STARTTLS, atau TLS implisit di port 465) bila dikonfigurasi; di luar produksi jatuh ke penulisan isi email ke log; di produksi tanpa SMTP pengiriman **dinonaktifkan** dan endpoint membalas `503`.
+- Rate limit lebih ketat dari login (5/menit) karena tiap request yang lolos mengirim email ke alamat pihak ketiga.
+
+**Konsekuensi.**
+- Pemulihan akun tidak lagi butuh akses shell ke server.
+- **Reset tidak mencabut sesi lama**: denylist bekerja per-`jti`, sehingga JWT yang terbit sebelum reset tetap valid sampai `exp`. Mencabutnya butuh pelacakan per-user (mis. `password_changed_at` dibandingkan klaim `iat`) — belum dikerjakan dan dicatat di `docs/DEPLOYMENT.md`.
+- Menolak pengiriman tanpa TLS berarti server SMTP tanpa STARTTLS tidak didukung; ini disengaja karena tautan reset setara kredensial sementara.
+- Di produksi tanpa SMTP, fitur mati terang-terangan alih-alih menulis tautan reset ke log produksi.
+
+---
+
 ## Template entri baru
 
 ```

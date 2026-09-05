@@ -9,16 +9,16 @@ type ExperienceHighlightResponse struct {
 }
 
 type ExperienceResponse struct {
-	ID          string                       `json:"id"`
-	Title       string                       `json:"title"`
-	Company     string                       `json:"company"`
-	Location    string                       `json:"location,omitempty"`
-	StartDate   string                       `json:"startDate"`           // "2006-01-02"
-	EndDate     *string                      `json:"endDate,omitempty"`   // nullable
-	IsCurrent   bool                         `json:"isCurrent"`
-	Description string                       `json:"description,omitempty"`
-	SortOrder   int                          `json:"sortOrder"`
-	Tags        []TagResponse                `json:"tags"`
+	ID          string                        `json:"id"`
+	Title       string                        `json:"title"`
+	Company     string                        `json:"company"`
+	Location    string                        `json:"location,omitempty"`
+	StartDate   string                        `json:"startDate"`         // "2006-01-02"
+	EndDate     *string                       `json:"endDate,omitempty"` // nullable
+	IsCurrent   bool                          `json:"isCurrent"`
+	Description string                        `json:"description,omitempty"`
+	SortOrder   int                           `json:"sortOrder"`
+	Tags        []TagResponse                 `json:"tags"`
 	Highlights  []ExperienceHighlightResponse `json:"highlights"`
 }
 
@@ -31,8 +31,8 @@ type ExperienceCreateRequest struct {
 	IsCurrent   bool     `json:"isCurrent"`
 	Description string   `json:"description"`
 	SortOrder   int      `json:"sortOrder"`
-	TagIDs      []string `json:"tagIds"`      // UUID string
-	Highlights  []string `json:"highlights"`  // teks bullet
+	TagIDs      []string `json:"tagIds"`     // UUID string
+	Highlights  []string `json:"highlights"` // teks bullet
 }
 
 type ExperienceUpdateRequest = ExperienceCreateRequest
@@ -78,4 +78,3 @@ func experienceToResponse(e models.Experience) ExperienceResponse {
 }
 
 // helper parse date "2006-01-02"
-

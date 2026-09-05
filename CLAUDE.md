@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Backend API for a personal portfolio site (projects, experiences, contact messages, admin dashboard). Go 1.25 + Fiber v2 (fasthttp) + GORM (PostgreSQL) + Atlas migrations. Auth is JWT (HS256). Komentar kode dan pesan log/error di repo ini ditulis dalam Bahasa Indonesia — ikuti gaya itu saat menambah kode.
+Backend API for a personal portfolio site (projects, experiences, contact messages, admin dashboard). Go 1.26 + Fiber v2 (fasthttp) + GORM (PostgreSQL) + Atlas migrations. Auth is JWT (HS256). Komentar kode dan pesan log/error di repo ini ditulis dalam Bahasa Indonesia — ikuti gaya itu saat menambah kode.
 
 ## Commands
 
@@ -122,7 +122,7 @@ Sesi utama berperan sebagai **PM/orchestrator**: pecah tugas, tentukan urutan, d
 sesi utama.
 
 Ringkasan stack untuk konteks delegasi:
-- **Backend (repo ini):** Go 1.25 + Fiber v2 (fasthttp) + GORM (PostgreSQL) + Atlas migrations, auth JWT HS256.
+- **Backend (repo ini):** Go 1.26 + Fiber v2 (fasthttp) + GORM (PostgreSQL) + Atlas migrations, auth JWT HS256.
 - **Frontend (repo terpisah `../portfolio-frontend`):** Next.js 16 App Router + React 19 + TypeScript + Tailwind, pnpm.
 - **Testing:** toolchain Go (`go test ./...`); utamakan test DB-free (`app.Test` + JWT). **Lint/format:** `make vet`, `make fmt`.
 - **Konvensi:** komentar & pesan log/error Bahasa Indonesia; commit konvensional (`feat`, `fix(security)`, dst).

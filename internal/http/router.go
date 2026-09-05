@@ -8,6 +8,7 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/denylist"
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/handlers"
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/middleware"
+	"github.com/FauzanParanditha/portfolio-backend/internal/mailer"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
@@ -20,6 +21,7 @@ type AppDeps struct {
 	DB       *gorm.DB
 	Config   *config.Config
 	Denylist denylist.Denylist
+	Mailer   mailer.Mailer
 }
 
 func NewRouter(deps AppDeps) *fiber.App {
@@ -35,6 +37,12 @@ func NewRouter(deps AppDeps) *fiber.App {
 		deps.Denylist = denylist.NewMemory()
 	}
 
+	// Mailer dipilih dari config (SMTP / log saat dev / dinonaktifkan di
+	// produksi tanpa SMTP). Dibuat di sini bila belum di-inject.
+	if deps.Mailer == nil {
+		deps.Mailer = mailer.New(deps.Config)
+	}
+
 	middleware.RegisterGlobal(app, deps.Config)
 
 	// Swagger UI hanya diaktifkan di luar produksi agar tidak membocorkan
@@ -46,6 +54,7 @@ func NewRouter(deps AppDeps) *fiber.App {
 	registerHealthRoutes(app, deps)
 
 	registerAuthRoutes(app, deps)
+	registerPasswordResetRoutes(app, deps)
 	registerAuthMeRoutes(app, deps)
 
 	registerPublicProjectRoutes(app, deps)
@@ -125,6 +134,37 @@ func registerAuthRoutes(app *fiber.App, deps AppDeps) {
 	// Logout PUBLIK (tanpa auth) agar user dengan token kedaluwarsa tetap bisa
 	// membersihkan cookie HttpOnly `access_token` di browser.
 	api.Post("/auth/logout", authHandler.Logout)
+}
+
+// Password reset routes (publik, tanpa auth — user memang sedang tidak bisa login)
+func registerPasswordResetRoutes(app *fiber.App, deps AppDeps) {
+	api := app.Group("/api/v1")
+
+	userRepo := repository.NewUserRepository(deps.DB)
+	tokenRepo := repository.NewPasswordResetRepository(deps.DB)
+	handler := handlers.NewPasswordResetHandler(userRepo, tokenRepo, deps.Mailer, deps.Config)
+
+	// Lebih ketat daripada login: setiap request yang lolos MENGIRIM email, jadi
+	// endpoint ini bisa disalahgunakan untuk membanjiri inbox orang lain.
+	forgotLimiter := limiter.New(limiter.Config{
+		Max:        5,
+		Expiration: 1 * time.Minute,
+		LimitReached: func(c *fiber.Ctx) error {
+			return fiber.NewError(http.StatusTooManyRequests, "too many reset requests, please try again later")
+		},
+	})
+
+	// Menahan brute-force penebakan token reset.
+	resetLimiter := limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		LimitReached: func(c *fiber.Ctx) error {
+			return fiber.NewError(http.StatusTooManyRequests, "too many attempts, please try again later")
+		},
+	})
+
+	api.Post("/auth/forgot-password", forgotLimiter, handler.ForgotPassword)
+	api.Post("/auth/reset-password", resetLimiter, handler.ResetPassword)
 }
 
 // Admin project routes

@@ -6,7 +6,7 @@ REST API untuk website portfolio pribadi — mengelola **projects**, **experienc
 
 | Komponen        | Teknologi                          |
 | --------------- | ---------------------------------- |
-| Bahasa          | Go 1.25                            |
+| Bahasa          | Go 1.26                            |
 | Web framework   | [Fiber v2](https://gofiber.io) (fasthttp) |
 | Database        | PostgreSQL 14                       |
 | ORM             | [GORM](https://gorm.io)            |
@@ -19,7 +19,7 @@ REST API untuk website portfolio pribadi — mengelola **projects**, **experienc
 
 ## Prasyarat
 
-- Go **1.25+**
+- Go **1.26+**
 - PostgreSQL **14+** berjalan secara lokal
 - [Atlas CLI](https://atlasgo.io/getting-started#installation) (untuk migrasi)
 - [air](https://github.com/air-verse/air) (opsional, untuk live reload)
@@ -64,6 +64,12 @@ Lihat [`.env.example`](.env.example) untuk daftar lengkap. Variabel penting:
 | `JWT_EXPIRES_IN`          | `3600`                           | Masa berlaku token (detik) |
 | `CORS_ALLOWED_ORIGINS`    | `http://localhost:3000`          | Jangan `*` jika credentials aktif |
 | `CORS_ALLOW_CREDENTIALS`  | `false`                          | |
+| `APP_FRONTEND_URL`        | `http://localhost:3000`          | Basis tautan di email (reset password) |
+| `COOKIE_SAMESITE`         | `Lax`                            | `Lax`/`Strict`/`None`. `None` untuk deploy lintas-domain |
+| `COOKIE_SECURE`           | `true` di produksi               | Wajib `true` bila `COOKIE_SAMESITE=None` |
+| `COOKIE_DOMAIN`           | kosong                           | Kosong = host-only. Lihat `docs/DEPLOYMENT.md` |
+| `SMTP_HOST` / `SMTP_FROM` | —                                | Wajib di produksi agar reset password aktif |
+| `PASSWORD_RESET_TTL`      | `3600`                           | Masa berlaku token reset (detik) |
 | `SEED_ADMIN_EMAIL`        | `admin@example.com`              | Dipakai oleh seeder |
 | `SEED_ADMIN_PASSWORD`     | `password-admin`                 | **Ganti dengan password kuat** |
 | `SEED_SAMPLE_DATA`        | `false`                          | `true` untuk membuat tag & project contoh |
@@ -142,6 +148,8 @@ Base path: `/api/v1`
 | GET    | `/projects`         | List project |
 | GET    | `/projects/:slug`   | Detail project |
 | GET    | `/experiences`      | List experience |
+| POST   | `/auth/forgot-password` | Kirim tautan reset password (rate-limited 5/menit) |
+| POST   | `/auth/reset-password`  | Setel password baru dengan token dari email |
 | POST   | `/contact`          | Kirim pesan kontak |
 
 ### Terautentikasi (JWT)
@@ -184,7 +192,8 @@ Beberapa kontrol yang sudah diterapkan:
 - Route `/admin/*` wajib JWT **dan** role `admin` (`AuthJWT` + `RequireRole`).
 - Password di-hash dengan **bcrypt**; field password tidak pernah dikembalikan ke JSON.
 - Validasi konfigurasi saat startup — di `production`, `JWT_SECRET` lemah/default atau CORS `*`+credentials akan **menghentikan** aplikasi.
-- Rate limiting pada endpoint login (anti brute-force).
+- Rate limiting pada endpoint login (anti brute-force) dan reset password (5/menit).
+- Token reset password acak 256-bit, disimpan sebagai **hash**, sekali pakai, dan kedaluwarsa; `forgot-password` membalas seragam agar tidak bisa dipakai mengenumerasi email terdaftar.
 - Security headers via `helmet`, batas body 1MB, query parameterized (anti SQL-injection).
 - Swagger UI hanya aktif di luar produksi.
 
@@ -195,3 +204,5 @@ Beberapa kontrol yang sudah diterapkan:
 3. Ganti `SEED_ADMIN_PASSWORD` dan kredensial database default.
 4. `DB_DSN` pakai `sslmode=require`.
 5. `CORS_ALLOWED_ORIGINS` di-set ke domain frontend yang spesifik.
+6. Atribut cookie sesi disesuaikan dengan topologi deploy — lihat **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**.
+7. SMTP diisi bila fitur reset password dipakai; tanpa itu endpointnya membalas `503` di produksi.

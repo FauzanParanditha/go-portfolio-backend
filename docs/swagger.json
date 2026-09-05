@@ -159,6 +159,49 @@
                 }
             }
         },
+        "/admin/dashboard/overview": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengembalikan agregat jumlah projects, experiences, dan contact messages, termasuk hitungan \"recent\" dalam 30 hari terakhir (`system.recentDays`).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-dashboard"
+                ],
+                "summary": "Ringkasan angka dashboard admin",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.DashboardOverviewResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/experiences": {
             "get": {
                 "security": [
@@ -739,9 +782,61 @@
                 }
             }
         },
+        "/auth/forgot-password": {
+            "post": {
+                "description": "Mengirim tautan reset ke email bila terdaftar. Response SELALU sama (`200`) baik email terdaftar maupun tidak, untuk mencegah user enumeration. Rate-limited.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Minta tautan reset password",
+                "parameters": [
+                    {
+                        "description": "Email akun",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForgotPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
-                "description": "Authenticate admin and return JWT token. Selain body JSON, server juga men-set cookie HttpOnly `access_token` (SameSite=Lax, Secure di produksi) yang dipakai klien browser. API client non-browser bisa mengabaikan cookie dan memakai field `token` di body via header Authorization.",
+                "description": "Authenticate admin and return JWT token. Selain body JSON, server juga men-set cookie HttpOnly `access_token` (atribut SameSite/Secure/Domain mengikuti konfigurasi deploy) yang dipakai klien browser. API client non-browser bisa mengabaikan cookie dan memakai field `token` di body via header Authorization.",
                 "consumes": [
                     "application/json"
                 ],
@@ -787,7 +882,7 @@
         },
         "/auth/logout": {
             "post": {
-                "description": "Menghapus cookie HttpOnly `access_token` di sisi browser (set cookie kedaluwarsa). Bersifat PUBLIK (tanpa auth) agar user dengan token kedaluwarsa tetap bisa membersihkan cookie. Karena auth stateless, token JWT lama TETAP valid sampai `exp`-nya — tidak ada revocation server-side.",
+                "description": "Menghapus cookie HttpOnly `access_token` di sisi browser DAN mencabut token saat ini (berdasarkan jti) lewat denylist sehingga token langsung tidak berlaku walau belum `exp`. Bersifat PUBLIK (tanpa middleware auth) agar user dengan token kedaluwarsa tetap bisa membersihkan cookie; token yang sudah invalid/kedaluwarsa cukup diabaikan.",
                 "produces": [
                     "application/json"
                 ],
@@ -837,7 +932,95 @@
                 }
             }
         },
+        "/auth/reset-password": {
+            "post": {
+                "description": "Menukar token dari tautan email dengan password baru. Token hanya berlaku sekali dan punya masa kedaluwarsa. Catatan: sesi/JWT yang sudah terbit sebelum reset TIDAK ikut dicabut.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Setel password baru dengan token reset",
+                "parameters": [
+                    {
+                        "description": "Token + password baru",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ResetPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/contact": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "contact"
+                ],
+                "summary": "Submit contact message",
+                "parameters": [
+                    {
+                        "description": "Contact form",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContactCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/contact-messages": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -1264,6 +1447,17 @@
                 }
             }
         },
+        "handlers.ForgotPasswordRequest": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.LoginRequest": {
             "type": "object",
             "required": [
@@ -1307,6 +1501,14 @@
                     "type": "string"
                 },
                 "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
                     "type": "string"
                 }
             }
@@ -1591,6 +1793,23 @@
                 "meta": {}
             }
         },
+        "handlers.ResetPasswordRequest": {
+            "type": "object",
+            "required": [
+                "password",
+                "token"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.TagCreateRequest": {
             "type": "object",
             "required": [
@@ -1632,6 +1851,64 @@
                 },
                 "type": {
                     "type": "string"
+                }
+            }
+        },
+        "models.DashboardOverviewResponse": {
+            "type": "object",
+            "properties": {
+                "contactMessages": {
+                    "type": "object",
+                    "properties": {
+                        "recentCount": {
+                            "type": "integer"
+                        },
+                        "total": {
+                            "type": "integer"
+                        },
+                        "unread": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "experiences": {
+                    "type": "object",
+                    "properties": {
+                        "current": {
+                            "type": "integer"
+                        },
+                        "recentCount": {
+                            "type": "integer"
+                        },
+                        "total": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "projects": {
+                    "type": "object",
+                    "properties": {
+                        "featured": {
+                            "type": "integer"
+                        },
+                        "recentCount": {
+                            "type": "integer"
+                        },
+                        "total": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "system": {
+                    "type": "object",
+                    "properties": {
+                        "recentDays": {
+                            "type": "integer"
+                        },
+                        "serverTime": {
+                            "type": "string"
+                        }
+                    }
                 }
             }
         }

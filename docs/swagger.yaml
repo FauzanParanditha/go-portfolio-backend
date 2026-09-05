@@ -155,6 +155,13 @@ definitions:
     - startDate
     - title
     type: object
+  handlers.ForgotPasswordRequest:
+    properties:
+      email:
+        type: string
+    required:
+    - email
+    type: object
   handlers.LoginRequest:
     properties:
       email:
@@ -184,6 +191,11 @@ definitions:
       name:
         type: string
       role:
+        type: string
+    type: object
+  handlers.MessageResponse:
+    properties:
+      message:
         type: string
     type: object
   handlers.ProjectCreateRequest:
@@ -378,6 +390,18 @@ definitions:
         type: array
       meta: {}
     type: object
+  handlers.ResetPasswordRequest:
+    properties:
+      password:
+        maxLength: 72
+        minLength: 8
+        type: string
+      token:
+        type: string
+    required:
+    - password
+    - token
+    type: object
   handlers.TagCreateRequest:
     properties:
       name:
@@ -406,6 +430,43 @@ definitions:
     required:
     - name
     - type
+    type: object
+  models.DashboardOverviewResponse:
+    properties:
+      contactMessages:
+        properties:
+          recentCount:
+            type: integer
+          total:
+            type: integer
+          unread:
+            type: integer
+        type: object
+      experiences:
+        properties:
+          current:
+            type: integer
+          recentCount:
+            type: integer
+          total:
+            type: integer
+        type: object
+      projects:
+        properties:
+          featured:
+            type: integer
+          recentCount:
+            type: integer
+          total:
+            type: integer
+        type: object
+      system:
+        properties:
+          recentDays:
+            type: integer
+          serverTime:
+            type: string
+        type: object
     type: object
 host: localhost:8080
 info:
@@ -504,6 +565,34 @@ paths:
       summary: Mark contact message read/unread
       tags:
       - admin-contact
+  /admin/dashboard/overview:
+    get:
+      description: Mengembalikan agregat jumlah projects, experiences, dan contact
+        messages, termasuk hitungan "recent" dalam 30 hari terakhir (`system.recentDays`).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.DashboardOverviewResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Ringkasan angka dashboard admin
+      tags:
+      - admin-dashboard
   /admin/experiences:
     get:
       parameters:
@@ -862,14 +951,50 @@ paths:
       summary: Update tag
       tags:
       - admin-tags
+  /auth/forgot-password:
+    post:
+      consumes:
+      - application/json
+      description: Mengirim tautan reset ke email bila terdaftar. Response SELALU
+        sama (`200`) baik email terdaftar maupun tidak, untuk mencegah user enumeration.
+        Rate-limited.
+      parameters:
+      - description: Email akun
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ForgotPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Minta tautan reset password
+      tags:
+      - auth
   /auth/login:
     post:
       consumes:
       - application/json
       description: Authenticate admin and return JWT token. Selain body JSON, server
-        juga men-set cookie HttpOnly `access_token` (SameSite=Lax, Secure di produksi)
-        yang dipakai klien browser. API client non-browser bisa mengabaikan cookie
-        dan memakai field `token` di body via header Authorization.
+        juga men-set cookie HttpOnly `access_token` (atribut SameSite/Secure/Domain
+        mengikuti konfigurasi deploy) yang dipakai klien browser. API client non-browser
+        bisa mengabaikan cookie dan memakai field `token` di body via header Authorization.
       parameters:
       - description: Login data
         in: body
@@ -897,10 +1022,11 @@ paths:
       - auth
   /auth/logout:
     post:
-      description: Menghapus cookie HttpOnly `access_token` di sisi browser (set cookie
-        kedaluwarsa). Bersifat PUBLIK (tanpa auth) agar user dengan token kedaluwarsa
-        tetap bisa membersihkan cookie. Karena auth stateless, token JWT lama TETAP
-        valid sampai `exp`-nya — tidak ada revocation server-side.
+      description: Menghapus cookie HttpOnly `access_token` di sisi browser DAN mencabut
+        token saat ini (berdasarkan jti) lewat denylist sehingga token langsung tidak
+        berlaku walau belum `exp`. Bersifat PUBLIK (tanpa middleware auth) agar user
+        dengan token kedaluwarsa tetap bisa membersihkan cookie; token yang sudah
+        invalid/kedaluwarsa cukup diabaikan.
       produces:
       - application/json
       responses:
@@ -934,7 +1060,66 @@ paths:
       summary: Refresh JWT token
       tags:
       - auth
+  /auth/reset-password:
+    post:
+      consumes:
+      - application/json
+      description: 'Menukar token dari tautan email dengan password baru. Token hanya
+        berlaku sekali dan punya masa kedaluwarsa. Catatan: sesi/JWT yang sudah terbit
+        sebelum reset TIDAK ikut dicabut.'
+      parameters:
+      - description: Token + password baru
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ResetPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Setel password baru dengan token reset
+      tags:
+      - auth
   /contact:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Contact form
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ContactCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Submit contact message
+      tags:
+      - contact
+  /contact-messages:
     post:
       consumes:
       - application/json

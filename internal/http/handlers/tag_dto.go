@@ -22,4 +22,3 @@ func tagToResponse(t models.Tag) TagResponse {
 		Type: t.Type,
 	}
 }
-

@@ -7,6 +7,7 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/db"
 	"github.com/FauzanParanditha/portfolio-backend/internal/denylist"
 	"github.com/FauzanParanditha/portfolio-backend/internal/logger"
+	"github.com/FauzanParanditha/portfolio-backend/internal/mailer"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
 
@@ -51,10 +52,14 @@ func main() {
 	// berlaku setelah proses restart — menggantikan default in-memory.
 	dl := denylist.NewPostgres(gormDB)
 
+	// Mailer untuk email transaksional (saat ini: tautan reset password).
+	mail := mailer.New(cfg)
+
 	app := httprouter.NewRouter(httprouter.AppDeps{
 		DB:       gormDB,
 		Config:   cfg,
 		Denylist: dl,
+		Mailer:   mail,
 	})
 
 	addr := fmt.Sprintf(":%s", cfg.AppPort)

@@ -168,6 +168,8 @@ Endpoint list menerima query params:
 | POST   | `/auth/login`   | —    | Login admin. **Rate-limited 10 req/menit** (`429` jika terlampaui). Set cookie `access_token` + body token |
 | POST   | `/auth/refresh` | JWT (header **atau** cookie) | Terbitkan token baru dari token valid yang sedang dipakai; set ulang cookie `access_token`. **Tidak** rate-limited. Stateless (tanpa DB/refresh-token store) |
 | POST   | `/auth/logout`  | —    | **Publik.** Hapus cookie `access_token` DAN **cabut token saat ini** (via `jti` → denylist) sehingga langsung tidak berlaku. Kirim token saat ini (header/cookie) agar tercabut |
+| POST   | `/auth/forgot-password` | —    | Kirim tautan reset ke email. Response **selalu sama** (`200`) terdaftar maupun tidak (anti user-enumeration). **Rate-limited 5 req/menit**. `503` bila SMTP belum dikonfigurasi |
+| POST   | `/auth/reset-password`  | —    | Tukar token dari email dengan password baru. Token sekali pakai + kedaluwarsa. **Rate-limited 10 req/menit** |
 | GET    | `/me`           | JWT (header **atau** cookie) | Info user saat ini |
 
 `POST /auth/login`
@@ -176,6 +178,7 @@ Endpoint list menerima query params:
 { "email": "admin@example.com", "password": "secret" }
 // 200 — payload di-wrap dalam "data"; server JUGA mengirim header
 //   Set-Cookie: access_token=<jwt>; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600  (+ Secure di produksi)
+//   Atribut SameSite/Secure/Domain mengikuti env deploy — lihat docs/DEPLOYMENT.md
 { "data": { "token": "<jwt>", "tokenType": "Bearer", "expiresIn": 3600 } }
 // 401 → { "error": { "message": "invalid credentials", ... } }
 ```
@@ -188,7 +191,7 @@ Endpoint list menerima query params:
 { "data": { "message": "logged out" } }
 ```
 
-> Revocation memakai `jti` + denylist in-memory (ADR-011): setelah logout, token yang sama → `401 "token revoked"`. Catatan: denylist hilang saat server restart & tidak dibagi antar-instance (single-instance OK; multi-instance perlu denylist DB/Redis).
+> Revocation memakai `jti` + denylist **persisten di PostgreSQL** (ADR-011, dipersisten di ADR-012): setelah logout, token yang sama → `401 "token revoked"`, dan pencabutan tetap berlaku setelah server restart maupun antar-instance yang berbagi database.
 
 > Pesan error login sengaja generik (`invalid credentials`) untuk email salah maupun password salah — mencegah enumerasi user.
 
@@ -202,6 +205,32 @@ Endpoint list menerima query params:
 ```
 
 > Refresh memakai middleware `AuthJWT` yang sama (validasi HS256, enforce signing method, secret yang sama) dan menerbitkan token baru dengan `jti` baru. Catatan: refresh **tidak** otomatis mencabut token lama — token sebelumnya tetap valid sampai `exp` atau sampai `logout` mencabutnya.
+
+
+`POST /auth/forgot-password`
+```json
+// request
+{ "email": "admin@example.com" }
+// 200 — SELALU bentuk ini, baik email terdaftar maupun tidak
+{ "data": { "message": "jika email terdaftar, tautan reset password sudah dikirim" } }
+// 422 → format email tidak valid
+// 429 → melebihi 5 req/menit
+// 503 → SMTP belum dikonfigurasi di server
+```
+
+> Email berisi tautan `{APP_FRONTEND_URL}/auth/reset-password?token=<token>`. Token acak 256-bit; yang disimpan di database hanya **SHA-256**-nya. Masa berlaku dari `PASSWORD_RESET_TTL` (default 1 jam), sekali pakai, dan menerbitkan token baru otomatis membatalkan token lama milik user yang sama.
+
+`POST /auth/reset-password`
+```json
+// request — token dari tautan email; password 8–72 karakter
+{ "token": "<token>", "password": "password-baru" }
+// 200
+{ "data": { "message": "password berhasil diperbarui, silakan login dengan password baru" } }
+// 400 → token tidak valid / sudah dipakai / kedaluwarsa (ketiganya dijawab sama)
+// 422 → password tidak memenuhi syarat panjang
+```
+
+> ⚠️ Reset password **tidak** mencabut sesi yang sudah berjalan: JWT yang terbit sebelum reset tetap valid sampai `exp` atau sampai `logout` mencabutnya.
 
 ### Projects (publik)
 

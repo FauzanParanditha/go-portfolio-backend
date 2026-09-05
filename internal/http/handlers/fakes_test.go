@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/FauzanParanditha/portfolio-backend/internal/mailer"
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/google/uuid"
@@ -151,8 +152,9 @@ func (f *fakeTagRepo) Delete(ctx context.Context, id string) error {
 // --- fakeUserRepo: implementasi repository.UserRepository ---
 
 type fakeUserRepo struct {
-	findByEmailFn func(ctx context.Context, email string) (*models.User, error)
-	findByIDFn    func(ctx context.Context, id string) (*models.User, error)
+	findByEmailFn    func(ctx context.Context, email string) (*models.User, error)
+	findByIDFn       func(ctx context.Context, id string) (*models.User, error)
+	updatePasswordFn func(ctx context.Context, id uuid.UUID, hashedPassword string) error
 }
 
 func (f *fakeUserRepo) FindByEmail(ctx context.Context, email string) (*models.User, error) {
@@ -161,6 +163,75 @@ func (f *fakeUserRepo) FindByEmail(ctx context.Context, email string) (*models.U
 
 func (f *fakeUserRepo) FindByID(ctx context.Context, id string) (*models.User, error) {
 	return f.findByIDFn(ctx, id)
+}
+
+func (f *fakeUserRepo) UpdatePassword(ctx context.Context, id uuid.UUID, hashedPassword string) error {
+	if f.updatePasswordFn == nil {
+		return nil
+	}
+	return f.updatePasswordFn(ctx, id, hashedPassword)
+}
+
+// --- fakePasswordResetRepo: implementasi repository.PasswordResetRepository ---
+
+type fakePasswordResetRepo struct {
+	createFn               func(ctx context.Context, t *models.PasswordResetToken) error
+	findValidByHashFn      func(ctx context.Context, tokenHash string) (*models.PasswordResetToken, error)
+	markUsedFn             func(ctx context.Context, id uuid.UUID) error
+	invalidateAllForUserFn func(ctx context.Context, userID uuid.UUID) error
+	deleteExpiredFn        func(ctx context.Context) error
+}
+
+func (f *fakePasswordResetRepo) Create(ctx context.Context, t *models.PasswordResetToken) error {
+	if f.createFn == nil {
+		return nil
+	}
+	return f.createFn(ctx, t)
+}
+
+func (f *fakePasswordResetRepo) FindValidByHash(ctx context.Context, tokenHash string) (*models.PasswordResetToken, error) {
+	return f.findValidByHashFn(ctx, tokenHash)
+}
+
+func (f *fakePasswordResetRepo) MarkUsed(ctx context.Context, id uuid.UUID) error {
+	if f.markUsedFn == nil {
+		return nil
+	}
+	return f.markUsedFn(ctx, id)
+}
+
+func (f *fakePasswordResetRepo) InvalidateAllForUser(ctx context.Context, userID uuid.UUID) error {
+	if f.invalidateAllForUserFn == nil {
+		return nil
+	}
+	return f.invalidateAllForUserFn(ctx, userID)
+}
+
+func (f *fakePasswordResetRepo) DeleteExpired(ctx context.Context) error {
+	if f.deleteExpiredFn == nil {
+		return nil
+	}
+	return f.deleteExpiredFn(ctx)
+}
+
+// --- fakeMailer: implementasi mailer.Mailer, merekam email terakhir ---
+
+type fakeMailer struct {
+	enabled bool
+	sendErr error
+
+	sentTo      string
+	sentSubject string
+	sentBody    string
+	sendCount   int
+}
+
+func (f *fakeMailer) Enabled() bool { return f.enabled }
+
+func (f *fakeMailer) Send(_ context.Context, to, subject, body string) error {
+	f.sendCount++
+	f.sentTo, f.sentSubject, f.sentBody = to, subject, body
+	return f.sendErr
 }
 
 // --- fakeDashboardRepo: implementasi repository.DashboardRepository ---
@@ -181,4 +252,6 @@ var (
 	_ repository.TagRepository            = (*fakeTagRepo)(nil)
 	_ repository.UserRepository           = (*fakeUserRepo)(nil)
 	_ repository.DashboardRepository      = (*fakeDashboardRepo)(nil)
+	_ repository.PasswordResetRepository  = (*fakePasswordResetRepo)(nil)
+	_ mailer.Mailer                       = (*fakeMailer)(nil)
 )

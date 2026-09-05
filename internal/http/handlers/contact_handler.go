@@ -30,6 +30,7 @@ func NewContactHandler(repo repository.ContactMessageRepository) *ContactHandler
 // @Success      201    {object} map[string]string
 // @Failure      422    {object} ErrorResponse
 // @Router       /contact [post]
+// @Router       /contact-messages [post]
 func (h *ContactHandler) Create(c *fiber.Ctx) error {
 	var req ContactCreateRequest
 

@@ -49,9 +49,9 @@ func RegisterGlobal(app *fiber.App, cfg *config.Config) {
 
 	// CORS dari ENV
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: cfg.CORSAllowedOrigins,
-		AllowMethods: cfg.CORSAllowedMethods,
-		AllowHeaders: cfg.CORSAllowedHeaders,
+		AllowOrigins:     cfg.CORSAllowedOrigins,
+		AllowMethods:     cfg.CORSAllowedMethods,
+		AllowHeaders:     cfg.CORSAllowedHeaders,
 		AllowCredentials: cfg.CORSAllowCredentials,
 	}))
 }

@@ -53,40 +53,46 @@ type JWTCustomClaims struct {
 const accessTokenCookieName = "access_token"
 
 // setAuthCookie menulis cookie `access_token` yang berisi JWT.
-// Atribut: HttpOnly, Path=/, SameSite=Lax, Max-Age=JWT_EXPIRES_IN detik.
-// Flag Secure hanya dipasang di produksi agar tetap jalan di http://localhost saat dev.
+// Atribut: HttpOnly, Path=/, Max-Age=JWT_EXPIRES_IN detik. Domain, SameSite,
+// dan Secure diambil dari config sehingga deploy same-site (default
+// SameSite=Lax, host-only) maupun lintas-domain (SameSite=None + Secure +
+// COOKIE_DOMAIN) sama-sama didukung tanpa mengubah kode.
+// Lihat docs/DEPLOYMENT.md.
 func (h *AuthHandler) setAuthCookie(c *fiber.Ctx, token string) {
 	c.Cookie(&fiber.Cookie{
 		Name:     accessTokenCookieName,
 		Value:    token,
 		Path:     "/",
+		Domain:   h.cfg.CookieDomain,
 		MaxAge:   h.cfg.JWTExpiresIn,
 		HTTPOnly: true,
-		Secure:   h.cfg.IsProduction(),
-		SameSite: "Lax",
+		Secure:   h.cfg.CookieSecure,
+		SameSite: h.cfg.NormalizedSameSite(),
 	})
 }
 
 // clearAuthCookie menghapus cookie `access_token` dengan menulis cookie kedaluwarsa
-// (nilai kosong, Expires di masa lalu / MaxAge negatif). Atribut Path/Secure/SameSite
-// dijaga konsisten dengan setAuthCookie agar browser benar-benar menimpanya.
+// (nilai kosong, Expires di masa lalu / MaxAge negatif). Atribut Domain/Path/Secure/
+// SameSite dijaga IDENTIK dengan setAuthCookie — browser hanya menimpa cookie bila
+// ketiganya cocok, jadi Domain yang berbeda akan menyisakan cookie lama.
 func (h *AuthHandler) clearAuthCookie(c *fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{
 		Name:     accessTokenCookieName,
 		Value:    "",
 		Path:     "/",
+		Domain:   h.cfg.CookieDomain,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 		HTTPOnly: true,
-		Secure:   h.cfg.IsProduction(),
-		SameSite: "Lax",
+		Secure:   h.cfg.CookieSecure,
+		SameSite: h.cfg.NormalizedSameSite(),
 	})
 }
 
 // POST /api/v1/auth/login
 // Login godoc
 // @Summary      Login admin
-// @Description  Authenticate admin and return JWT token. Selain body JSON, server juga men-set cookie HttpOnly `access_token` (SameSite=Lax, Secure di produksi) yang dipakai klien browser. API client non-browser bisa mengabaikan cookie dan memakai field `token` di body via header Authorization.
+// @Description  Authenticate admin and return JWT token. Selain body JSON, server juga men-set cookie HttpOnly `access_token` (atribut SameSite/Secure/Domain mengikuti konfigurasi deploy) yang dipakai klien browser. API client non-browser bisa mengabaikan cookie dan memakai field `token` di body via header Authorization.
 // @Tags         auth
 // @Accept       json
 // @Produce      json

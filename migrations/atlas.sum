@@ -1,6 +1,7 @@
-h1:FnLYdHp1jeDvmD2O31917fvIUeDAZFO/zehUpH7Fnro=
+h1:7/l2SyK/J5LZAidfLsQMAoZ/hQW/5URnBsOu0bNeDqI=
 20251119024357_init_schema.sql h1:i3caNfBeSrOf1fcRwWFBGannxJED6qWnwTGEcsUmo9I=
 20251201030300_add_users.sql h1:t+lh3XNoItOKwDKHNVxCBNEl4wq42xfl5qB2aF/jqVI=
 20251209085143_update_contact_messages_schema.sql h1:rMEzNHOSEF0788mf+z6MAdUn3ZShbWdTL8ydOyI/2Js=
 20251211044428_upgrade_projects_case_study.sql h1:SRwOSTx+O0LPfXoQEVnLWmXMEqYvt/DUhGLTfBe2d+o=
 20260711015108_add_revoked_tokens.sql h1:vl24WAOig1bPgKqjhXJYEhPAfCy5QRvuTiOJsH21Eg4=
+20260905103500_add_password_reset_tokens.sql h1:6mDmgo9gGRpynkrAUceDu8BC0kQX+S1lffZ7Mx2VRx8=

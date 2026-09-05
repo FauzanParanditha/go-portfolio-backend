@@ -19,6 +19,18 @@ func NewAdminDashboardHandler(repo repository.DashboardRepository) *AdminDashboa
 	return &AdminDashboardHandler{repo: repo}
 }
 
+// GET /api/v1/admin/dashboard/overview
+// Admin Dashboard Overview godoc
+// @Summary      Ringkasan angka dashboard admin
+// @Description  Mengembalikan agregat jumlah projects, experiences, dan contact messages, termasuk hitungan "recent" dalam 30 hari terakhir (`system.recentDays`).
+// @Tags         admin-dashboard
+// @Security     BearerAuth
+// @Produce      json
+// @Success      200  {object} models.DashboardOverviewResponse
+// @Failure      401  {object} ErrorResponse
+// @Failure      403  {object} ErrorResponse
+// @Failure      500  {object} ErrorResponse
+// @Router       /admin/dashboard/overview [get]
 func (h *AdminDashboardHandler) Overview(c *fiber.Ctx) error {
 	recentDays := 30
 	since := time.Now().AddDate(0, 0, -recentDays)

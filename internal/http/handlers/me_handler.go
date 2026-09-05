@@ -41,12 +41,15 @@ func (h *MeHandler) Me(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusUnauthorized, "unauthorized")
 	}
 
-	// kamu bisa langsung return tanpa query DB.
+	// AuthJWT hanya menaruh `user_id` + `user_role` di Locals (klaim JWT tidak
+	// memuat name/email), jadi di alur normal cabang di bawah SELALU jatuh ke
+	// query DB. Pembacaan Locals ini dipertahankan sebagai jalur cepat bila
+	// suatu saat middleware ikut mengisi name/email.
 	name, _ := c.Locals("user_name").(string)
 	email, _ := c.Locals("user_email").(string)
 	role, _ := c.Locals("user_role").(string)
 
-	// Jika name/email kosong (middleware belum set lengkap), fallback ke DB
+	// Name/email tidak tersedia dari Locals → ambil dari DB.
 	if email == "" || name == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -62,7 +65,7 @@ func (h *MeHandler) Me(c *fiber.Ctx) error {
 				ID:    user.ID.String(),
 				Name:  user.Name,
 				Email: user.Email,
-				Role:  user.Role, // kalau tidak ada, hapus field ini
+				Role:  user.Role,
 			},
 		})
 	}
