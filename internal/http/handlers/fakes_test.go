@@ -7,6 +7,7 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/mailer"
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
+	"github.com/FauzanParanditha/portfolio-backend/internal/storage"
 	"github.com/google/uuid"
 )
 
@@ -244,6 +245,30 @@ func (f *fakeDashboardRepo) Overview(ctx context.Context, since time.Time) (repo
 	return f.overviewFn(ctx, since)
 }
 
+// --- fakeStorage: implementasi storage.Storage, merekam panggilan terakhir ---
+
+type fakeStorage struct {
+	saveFn func(data []byte, originalName string) (*storage.SavedFile, error)
+
+	gotData []byte
+	gotName string
+	calls   int
+}
+
+func (f *fakeStorage) Save(data []byte, originalName string) (*storage.SavedFile, error) {
+	f.calls++
+	f.gotData, f.gotName = data, originalName
+	if f.saveFn != nil {
+		return f.saveFn(data, originalName)
+	}
+	return &storage.SavedFile{
+		Filename:    "abc.png",
+		URL:         "https://api.example.com/uploads/abc.png",
+		ContentType: "image/png",
+		Size:        int64(len(data)),
+	}, nil
+}
+
 // Pastikan fake memenuhi kontrak interface pada waktu kompilasi.
 var (
 	_ repository.ProjectRepository        = (*fakeProjectRepo)(nil)
@@ -254,4 +279,5 @@ var (
 	_ repository.DashboardRepository      = (*fakeDashboardRepo)(nil)
 	_ repository.PasswordResetRepository  = (*fakePasswordResetRepo)(nil)
 	_ mailer.Mailer                       = (*fakeMailer)(nil)
+	_ storage.Storage                     = (*fakeStorage)(nil)
 )

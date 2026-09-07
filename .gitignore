@@ -45,3 +45,8 @@ tmp/
 # File tetap ada di disk untuk koordinasi lokal, hanya tidak di-track git.
 docs/NOTES-FOR-FRONTEND.md
 docs/NOTES-FOR-BACKEND.md
+
+# Berkas unggahan admin (gambar proyek, CV). Isinya milik lingkungan masing-masing
+# dan tidak boleh masuk repo. Di produksi, pasang folder ini sebagai volume
+# persisten — kalau tidak, berkas hilang setiap container dibuat ulang.
+/uploads/

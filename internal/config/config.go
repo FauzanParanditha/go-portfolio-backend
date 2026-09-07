@@ -45,6 +45,16 @@ type Config struct {
 
 	// PasswordResetTTL adalah masa berlaku token reset password dalam detik.
 	PasswordResetTTL int
+
+	// --- Unggahan berkas ---
+	// AppPublicURL adalah base URL backend ini dari sisi browser. Dipakai untuk
+	// menyusun URL berkas unggahan yang disimpan ke database, sehingga harus
+	// alamat yang benar-benar bisa dibuka klien (bukan "localhost" di produksi).
+	AppPublicURL string
+	// UploadDir adalah folder tempat berkas unggahan disimpan.
+	UploadDir string
+	// UploadMaxBytes adalah batas ukuran satu berkas unggahan.
+	UploadMaxBytes int
 }
 
 func Load() *Config {
@@ -80,6 +90,13 @@ func Load() *Config {
 		SMTPFromName: helpers.GetEnv("SMTP_FROM_NAME", "Portfolio"),
 
 		PasswordResetTTL: helpers.GetEnvInt("PASSWORD_RESET_TTL", 3600),
+
+		AppPublicURL: strings.TrimRight(
+			helpers.GetEnv("APP_PUBLIC_URL", "http://localhost:"+helpers.GetEnv("APP_PORT", "8080")),
+			"/",
+		),
+		UploadDir:      helpers.GetEnv("UPLOAD_DIR", "./uploads"),
+		UploadMaxBytes: helpers.GetEnvInt("UPLOAD_MAX_BYTES", 5*1024*1024), // 5 MB
 	}
 }
 
@@ -152,6 +169,12 @@ func (c *Config) Validate() error {
 	// Di produksi, cookie sesi tanpa Secure berarti token bisa bocor lewat HTTP.
 	if c.IsProduction() && !c.CookieSecure {
 		problems = append(problems, "COOKIE_SECURE=false di produksi (cookie sesi akan terkirim lewat HTTP polos)")
+	}
+
+	// URL berkas unggahan ikut TERSIMPAN ke database (mis. coverImageUrl), jadi
+	// salah isi di produksi berarti gambar rusak permanen di baris-baris lama.
+	if c.IsProduction() && strings.Contains(c.AppPublicURL, "localhost") {
+		problems = append(problems, "APP_PUBLIC_URL masih menunjuk localhost di produksi (URL ini tersimpan ke database bersama berkas unggahan)")
 	}
 
 	if len(problems) == 0 {

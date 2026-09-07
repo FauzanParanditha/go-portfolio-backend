@@ -10,8 +10,10 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/middleware"
 	"github.com/FauzanParanditha/portfolio-backend/internal/mailer"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
+	"github.com/FauzanParanditha/portfolio-backend/internal/storage"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
+	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
 	fiberSwagger "github.com/gofiber/swagger"
@@ -22,13 +24,16 @@ type AppDeps struct {
 	Config   *config.Config
 	Denylist denylist.Denylist
 	Mailer   mailer.Mailer
+	Storage  storage.Storage
 }
 
 func NewRouter(deps AppDeps) *fiber.App {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: NewErrorHandler(),
-		// Batasi ukuran body untuk mencegah resource exhaustion (default 4MB).
-		BodyLimit: 1 * 1024 * 1024, // 1MB
+		// Batas ini berlaku satu aplikasi penuh, jadi harus cukup untuk berkas
+		// unggahan terbesar. Route selain unggahan tetap dijaga 1 MB oleh guard
+		// di middleware.RegisterGlobal.
+		BodyLimit: deps.Config.UploadMaxBytes + 1*1024*1024, // + slack multipart
 	})
 
 	// Denylist token (revocation saat logout). Satu instance dibagikan ke
@@ -43,6 +48,22 @@ func NewRouter(deps AppDeps) *fiber.App {
 		deps.Mailer = mailer.New(deps.Config)
 	}
 
+	// Penyimpanan berkas unggahan. Bila foldernya tidak bisa disiapkan, aplikasi
+	// tetap jalan — hanya endpoint unggah yang tidak didaftarkan, sehingga
+	// kegagalan terlihat sebagai 404 yang jelas, bukan panic saat runtime.
+	if deps.Storage == nil {
+		disk, err := storage.NewDisk(
+			deps.Config.UploadDir,
+			deps.Config.AppPublicURL,
+			int64(deps.Config.UploadMaxBytes),
+		)
+		if err != nil {
+			log.Error().Err(err).Msg("penyimpanan unggahan tidak aktif")
+		} else {
+			deps.Storage = disk
+		}
+	}
+
 	middleware.RegisterGlobal(app, deps.Config)
 
 	// Swagger UI hanya diaktifkan di luar produksi agar tidak membocorkan
@@ -52,6 +73,7 @@ func NewRouter(deps AppDeps) *fiber.App {
 	}
 
 	registerHealthRoutes(app, deps)
+	registerUploadRoutes(app, deps)
 
 	registerAuthRoutes(app, deps)
 	registerPasswordResetRoutes(app, deps)
@@ -134,6 +156,29 @@ func registerAuthRoutes(app *fiber.App, deps AppDeps) {
 	// Logout PUBLIK (tanpa auth) agar user dengan token kedaluwarsa tetap bisa
 	// membersihkan cookie HttpOnly `access_token` di browser.
 	api.Post("/auth/logout", authHandler.Logout)
+}
+
+// Upload routes: endpoint admin untuk mengunggah + penyajian berkasnya.
+func registerUploadRoutes(app *fiber.App, deps AppDeps) {
+	// Berkas dilayani statis dan PUBLIK — memang harus terbaca pengunjung situs.
+	// Browse dimatikan agar isi folder tidak bisa didaftar orang lain.
+	app.Static("/uploads", deps.Config.UploadDir, fiber.Static{
+		Browse:    false,
+		ByteRange: true,
+		MaxAge:    int((24 * time.Hour).Seconds()),
+	})
+
+	// Unggahan sendiri tetap admin-only.
+	api := app.Group("/api/v1")
+	admin := api.Group("/admin")
+	admin.Use(middleware.AuthJWT(deps.Config, deps.Denylist))
+	admin.Use(middleware.RequireRole("admin"))
+
+	if deps.Storage == nil {
+		return
+	}
+	handler := handlers.NewAdminUploadHandler(deps.Storage)
+	admin.Post("/uploads", handler.Upload)
 }
 
 // Password reset routes (publik, tanpa auth — user memang sedang tidak bisa login)

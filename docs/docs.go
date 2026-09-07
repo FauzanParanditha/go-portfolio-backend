@@ -785,6 +785,73 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/uploads": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Menerima satu berkas lewat multipart form field ` + "`" + `file` + "`" + `, lalu mengembalikan URL publiknya untuk ditempel ke field seperti ` + "`" + `coverImageUrl` + "`" + `. Jenis berkas ditentukan dari ISI berkas, bukan dari header Content-Type kiriman klien. Yang diizinkan: JPEG, PNG, WebP, GIF, dan PDF — SVG sengaja ditolak karena bisa memuat skrip.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-uploads"
+                ],
+                "summary": "Unggah berkas (gambar proyek / CV)",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Berkas yang diunggah",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.UploadResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/forgot-password": {
             "post": {
                 "description": "Mengirim tautan reset ke email bila terdaftar. Response SELALU sama (` + "`" + `200` + "`" + `) baik email terdaftar maupun tidak, untuk mencegah user enumeration. Rate-limited.",
@@ -1853,6 +1920,24 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.UploadResponse": {
+            "type": "object",
+            "properties": {
+                "contentType": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "url": {
+                    "description": "URL siap ditempel ke field seperti ` + "`" + `coverImageUrl` + "`" + `.",
                     "type": "string"
                 }
             }

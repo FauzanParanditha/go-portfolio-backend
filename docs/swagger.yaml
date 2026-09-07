@@ -431,6 +431,18 @@ definitions:
     - name
     - type
     type: object
+  handlers.UploadResponse:
+    properties:
+      contentType:
+        type: string
+      filename:
+        type: string
+      size:
+        type: integer
+      url:
+        description: URL siap ditempel ke field seperti `coverImageUrl`.
+        type: string
+    type: object
   models.DashboardOverviewResponse:
     properties:
       contactMessages:
@@ -951,6 +963,53 @@ paths:
       summary: Update tag
       tags:
       - admin-tags
+  /admin/uploads:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Menerima satu berkas lewat multipart form field `file`, lalu mengembalikan
+        URL publiknya untuk ditempel ke field seperti `coverImageUrl`. Jenis berkas
+        ditentukan dari ISI berkas, bukan dari header Content-Type kiriman klien.
+        Yang diizinkan: JPEG, PNG, WebP, GIF, dan PDF — SVG sengaja ditolak karena
+        bisa memuat skrip.'
+      parameters:
+      - description: Berkas yang diunggah
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.UploadResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Unggah berkas (gambar proyek / CV)
+      tags:
+      - admin-uploads
   /auth/forgot-password:
     post:
       consumes:

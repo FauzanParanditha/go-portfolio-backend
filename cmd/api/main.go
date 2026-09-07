@@ -8,6 +8,7 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/denylist"
 	"github.com/FauzanParanditha/portfolio-backend/internal/logger"
 	"github.com/FauzanParanditha/portfolio-backend/internal/mailer"
+	"github.com/FauzanParanditha/portfolio-backend/internal/storage"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
 
@@ -55,11 +56,19 @@ func main() {
 	// Mailer untuk email transaksional (saat ini: tautan reset password).
 	mail := mailer.New(cfg)
 
+	// Penyimpanan berkas unggahan. Gagal menyiapkan folder = masalah konfigurasi
+	// yang harus terlihat saat start, bukan saat admin menekan tombol unggah.
+	store, err := storage.NewDisk(cfg.UploadDir, cfg.AppPublicURL, int64(cfg.UploadMaxBytes))
+	if err != nil {
+		log.Fatal().Err(err).Msg("gagal menyiapkan penyimpanan unggahan")
+	}
+
 	app := httprouter.NewRouter(httprouter.AppDeps{
 		DB:       gormDB,
 		Config:   cfg,
 		Denylist: dl,
 		Mailer:   mail,
+		Storage:  store,
 	})
 
 	addr := fmt.Sprintf(":%s", cfg.AppPort)
