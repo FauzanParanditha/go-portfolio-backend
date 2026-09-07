@@ -1286,6 +1286,35 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/tags": {
+            "get": {
+                "description": "Seluruh tag beserta tipenya, dipakai situs publik untuk menyusun daftar keahlian. Read-only; pembuatan dan perubahan tetap lewat endpoint admin.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tags"
+                ],
+                "summary": "Daftar tag publik",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handlers.TagResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {

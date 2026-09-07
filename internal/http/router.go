@@ -80,6 +80,7 @@ func NewRouter(deps AppDeps) *fiber.App {
 	registerAuthMeRoutes(app, deps)
 
 	registerPublicProjectRoutes(app, deps)
+	registerPublicTagRoutes(app, deps)
 	registerPublicExperienceRoutes(app, deps)
 	registerPublicContactRoutes(app, deps)
 
@@ -229,6 +230,16 @@ func registerAdminProjectRoutes(app *fiber.App, deps AppDeps) {
 	p.Post("/", adminProjectHandler.Create)
 	p.Put("/:id", adminProjectHandler.Update)
 	p.Delete("/:id", adminProjectHandler.Delete)
+}
+
+// Public tag route — dipakai situs publik untuk menyusun daftar keahlian.
+// Read-only; pembuatan/perubahan tetap lewat grup admin di bawah.
+func registerPublicTagRoutes(app *fiber.App, deps AppDeps) {
+	repo := repository.NewTagRepository(deps.DB)
+	handler := handlers.NewTagHandler(repo)
+
+	api := app.Group("/api/v1")
+	api.Get("/tags", handler.List)
 }
 
 // Admin tag routes
