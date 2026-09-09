@@ -1,0 +1,47 @@
+{
+  "projects": [
+    {
+      "title": "Portfolio Backend",
+      "slug": "portfolio-backend",
+      "shortDesc": "REST API berlapis untuk situs portfolio: proyek, pengalaman, pesan kontak, dan panel admin.",
+      "longDescription": "Backend Go dengan pemisahan tegas antara handler, repository, dan model. Autentikasi JWT HS256 lewat cookie HttpOnly, dengan pencabutan token berbasis jti yang dipersistensikan ke PostgreSQL sehingga logout tetap berlaku setelah restart.",
+      "coverImageUrl": "",
+      "category": "API",
+      "timeline": "2025 – 2026",
+      "role": "Fullstack Developer",
+      "challenge": "Panel admin butuh autentikasi yang benar-benar mematikan sesi saat logout, bukan sekadar menghapus cookie di browser. JWT yang stateless membuat token lama tetap sah sampai kedaluwarsa.",
+      "solution": "Setiap token membawa jti unik yang bisa dimasukkan ke denylist persisten di PostgreSQL. Pengecekan berjalan di jalur panas setiap request, jadi dirancang fail-open: gangguan database tidak boleh menolak seluruh request auth sekaligus.",
+      "results": [
+        "Cakupan test paket handler 34,7% menjadi 76,3%",
+        "HTML beranda 16 KB menjadi 60 KB — isi kini terkirim dari server",
+        "Waktu tunggu isi pertama 3,2 detik menjadi 0",
+        "20 MB aset tak terpakai dikeluarkan dari deploy"
+      ],
+      "technicalDetails": {
+        "backend": "Go 1.26, Fiber v2 (fasthttp)",
+        "database": "PostgreSQL, GORM, migrasi berversi Atlas",
+        "frontend": "Next.js 16 App Router, React 19, Tailwind 4",
+        "deployment": "Berkas unggahan di volume persisten; cookie sesi dikonfigurasi per topologi",
+        "architecture": "handler → repository → models, dengan repository sebagai satu-satunya batas akses SQL"
+      },
+      "demoUrl": null,
+      "repoUrl": "https://github.com/FauzanParanditha/go-portfolio-backend",
+      "screenshots": [],
+      "features": [
+        "JWT HS256 lewat cookie HttpOnly, dengan pencabutan berbasis jti",
+        "Reset password lewat email: token sekali pakai, disimpan sebagai hash",
+        "Unggah berkas dengan deteksi jenis dari isi berkas, bukan dari header klien",
+        "Rate limit terpisah untuk login dan permintaan reset",
+        "Dokumentasi Swagger yang diregenerasi dari anotasi handler"
+      ],
+      "tags": [
+        { "name": "Go", "type": "backend" },
+        { "name": "Fiber", "type": "framework" },
+        { "name": "PostgreSQL", "type": "database" },
+        { "name": "Atlas", "type": "tools" }
+      ],
+      "isFeatured": true,
+      "sortOrder": 1
+    }
+  ]
+}

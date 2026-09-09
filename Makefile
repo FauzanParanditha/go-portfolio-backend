@@ -2,7 +2,7 @@ APP_NAME=portfolio-backend
 CMD_PATH=./cmd/api
 ATLAS_ENV=dev
 
-.PHONY: seed run build tidy migrate-new migrate-up migrate-down migrate-down-to migrate-down-all migrate-status fmt vet test
+.PHONY: seed import run build tidy migrate-new migrate-up migrate-down migrate-down-to migrate-down-all migrate-status fmt vet test
 
 ## ------- Development Commands ------- ##
 
@@ -31,6 +31,16 @@ vet:
 ## Tidy dependency
 tidy:
 	go mod tidy
+
+
+## Impor proyek dari berkas JSON (tanpa panel admin)
+## contoh: make import file=docs/contoh-import-proyek.json
+##         make import file=data/proyek.json args=-dry   # pratinjau saja
+import:
+ifndef file
+	$(error file is required. Usage: make import file=docs/contoh-import-proyek.json)
+endif
+	go run ./cmd/import -file $(file) $(args)
 
 
 ## ------- Database Migration (Atlas) ------- ##
