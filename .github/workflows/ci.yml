@@ -22,7 +22,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          # Membaca direktif `go`/`toolchain` dari go.mod (saat ini toolchain go1.26.4).
+          # Membaca direktif `go`/`toolchain` dari go.mod (saat ini toolchain go1.26.8).
           go-version-file: go.mod
           check-latest: true
           cache: true
