@@ -157,3 +157,62 @@ func TestProjectDetailBySlugNotFound(t *testing.T) {
 		t.Errorf("error.code = %v, mau NOT_FOUND", errObj["code"])
 	}
 }
+
+// Filter tag HARUS diteruskan ke repository, bukan dikerjakan di klien.
+// Sebelumnya halaman /projects menyaring hasil satu halaman di browser, jadi
+// memfilter di halaman 2 dengan tag yang hanya ada di halaman 1 menghasilkan
+// kosong — dan `total` untuk paginasi pun salah.
+func TestPublicProjectListMeneruskanFilterTag(t *testing.T) {
+	var got repository.ProjectListParams
+	repo := &fakeProjectRepo{
+		listFn: func(_ context.Context, p repository.ProjectListParams) ([]models.Project, int64, error) {
+			got = p
+			return []models.Project{}, 0, nil
+		},
+	}
+
+	app := newTestApp()
+	app.Get("/projects", handlers.NewProjectHandler(repo).List)
+
+	status, body := doJSON(t, app,
+		httptest.NewRequest(http.MethodGet, "/projects?tag=Go&page=2&limit=6", nil))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, mau 200. body: %s", status, body)
+	}
+
+	if got.Tag != "Go" {
+		t.Errorf("Tag = %q, mau Go", got.Tag)
+	}
+	if got.Page != 2 || got.Limit != 6 {
+		t.Errorf("Page/Limit = %d/%d, mau 2/6", got.Page, got.Limit)
+	}
+
+	// `tag` ikut dikembalikan di meta supaya klien bisa menampilkan filter aktif.
+	m := decode(t, body)
+	meta, ok := m["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta tidak ditemukan: %s", body)
+	}
+	if meta["tag"] != "Go" {
+		t.Errorf("meta.tag = %v, mau Go", meta["tag"])
+	}
+}
+
+// Spasi di sekitar nilai tag tidak boleh membuat filter gagal cocok.
+func TestPublicProjectListTagDipangkas(t *testing.T) {
+	var got repository.ProjectListParams
+	repo := &fakeProjectRepo{
+		listFn: func(_ context.Context, p repository.ProjectListParams) ([]models.Project, int64, error) {
+			got = p
+			return nil, 0, nil
+		},
+	}
+
+	app := newTestApp()
+	app.Get("/projects", handlers.NewProjectHandler(repo).List)
+
+	doJSON(t, app, httptest.NewRequest(http.MethodGet, "/projects?tag=%20Go%20", nil))
+	if got.Tag != "Go" {
+		t.Errorf("Tag = %q, mau Go (dipangkas)", got.Tag)
+	}
+}

@@ -12,8 +12,11 @@ import (
 type ProjectListParams struct {
 	FeaturedOnly bool
 	Query        string
-	Page         int
-	Limit        int
+	// Tag memfilter berdasarkan NAMA tag (case-insensitive), bukan UUID —
+	// nilainya datang dari URL halaman /projects sehingga harus enak dibaca.
+	Tag   string
+	Page  int
+	Limit int
 }
 
 // ProjectAdminListParams adalah filter/pagination untuk list admin project.
@@ -87,6 +90,21 @@ func (r *projectRepository) ListPublic(ctx context.Context, params ProjectListPa
 				Or("LOWER(projects.long_desc) LIKE ?", like).
 				Or("LOWER(projects.category) LIKE ?", like),
 		)
+	}
+
+	// Filter tag dikerjakan di DATABASE, bukan di klien. Sebelumnya halaman
+	// /projects menyaring hasil satu halaman di browser, sehingga memfilter di
+	// halaman 2 dengan tag yang hanya ada di halaman 1 menghasilkan kosong —
+	// dan `total` untuk paginasi pun salah.
+	//
+	// Memakai subquery EXISTS, bukan JOIN, supaya proyek tidak terduplikasi
+	// ketika cocok dengan lebih dari satu tag (yang juga akan mengacaukan Count).
+	if params.Tag != "" {
+		q = q.Where(`EXISTS (
+			SELECT 1 FROM project_tags pt
+			JOIN tags t ON t.id = pt.tag_id
+			WHERE pt.project_id = projects.id AND LOWER(t.name) = ?
+		)`, strings.ToLower(params.Tag))
 	}
 
 	// hitung total (untuk pagination)

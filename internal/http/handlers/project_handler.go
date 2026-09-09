@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/response"
@@ -20,7 +21,7 @@ func NewProjectHandler(repo repository.ProjectRepository) *ProjectHandler {
 	return &ProjectHandler{repo: repo}
 }
 
-// GET /api/v1/projects?featured=true&q=...&page=1&limit=12
+// GET /api/v1/projects?featured=true&q=...&tag=Go&page=1&limit=12
 // List Public Projects godoc
 // @Summary      Get public projects
 // @Description  List projects visible publicly with search & pagination
@@ -29,6 +30,7 @@ func NewProjectHandler(repo repository.ProjectRepository) *ProjectHandler {
 // @Produce      json
 // @Param        q         query    string false "Search keyword"
 // @Param        featured  query    bool   false "Filter featured"
+// @Param        tag       query    string false "Filter berdasarkan nama tag (case-insensitive)"
 // @Param        page      query    int    false "Page number"
 // @Param        limit     query    int    false "Items per page"
 // @Success      200  {object}  ProjectsListResponse
@@ -36,6 +38,7 @@ func NewProjectHandler(repo repository.ProjectRepository) *ProjectHandler {
 // @Router       /projects [get]
 func (h *ProjectHandler) List(c *fiber.Ctx) error {
 	featured := c.Query("featured") == "true"
+	tag := strings.TrimSpace(c.Query("tag"))
 	searchQ := c.Query("q")
 
 	page, err := strconv.Atoi(c.Query("page", "1"))
@@ -56,6 +59,7 @@ func (h *ProjectHandler) List(c *fiber.Ctx) error {
 	params := repository.ProjectListParams{
 		FeaturedOnly: featured,
 		Query:        searchQ,
+		Tag:          tag,
 		Page:         page,
 		Limit:        limit,
 	}
@@ -65,6 +69,7 @@ func (h *ProjectHandler) List(c *fiber.Ctx) error {
 		log.Error().
 			Err(err).
 			Bool("featured", featured).
+			Str("tag", tag).
 			Str("q", searchQ).
 			Int("page", page).
 			Int("limit", limit).
@@ -90,6 +95,7 @@ func (h *ProjectHandler) List(c *fiber.Ctx) error {
 			"hasMore":    hasMore,
 			"q":          searchQ,
 			"featured":   featured,
+			"tag":        tag,
 		},
 	})
 }
