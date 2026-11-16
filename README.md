@@ -283,7 +283,14 @@ Hal yang perlu diperhatikan:
   `cfg.Validate()` menolaknya (fatal di produksi), begitu pula rentang yang
   lebih lebar dari `/8` (IPv4) atau `/32` (IPv6), termasuk bentuk IPv4-mapped
   seperti `::ffff:0:0/96` (= seluruh IPv4), entri yang tidak bisa di-parse, dan
-  `PROXY_HEADER` yang diisi tanpa `TRUSTED_PROXIES`.
+  `PROXY_HEADER` yang diisi tanpa `TRUSTED_PROXIES`. Di environment mana pun
+  (juga dev/staging yang hanya memperingatkan), entri bermasalah tersebut
+  **dibuang** dan tidak pernah dipercaya Fiber.
+- Rentang yang memuat alamat **publik** dengan prefix lebih lebar dari `/24`
+  (IPv4) atau `/64` (IPv6), mis. `8.0.0.0/8` atau `2600::/32`, memicu
+  peringatan saat start: semua mesin di rentang itu bisa memalsukan header IP.
+  Rentang privat (`10.0.0.0/8`, `172.16.0.0/12`) tidak kena peringatan ini,
+  tetapi IP spesifik tetap lebih aman (lihat catatan Docker di atas).
 - CIDR dengan host bit terisi (mis. `10.0.0.5/24`) memicu peringatan saat
   start: yang dipercaya adalah seluruh `10.0.0.0/24`. Tulis IP tunggal bila
   maksudnya satu proxy.
@@ -291,6 +298,9 @@ Hal yang perlu diperhatikan:
   `FD00::1` → `fd00::1`), karena Fiber mencocokkannya sebagai string persis.
 - Kunci rate limit: IPv4 per alamat, IPv6 per prefix `/64` (satu pelanggan
   IPv6 tidak bisa memutar alamat di subnet-nya untuk mendapat jatah baru).
+  Nilai header yang lolos validasi Fiber tetapi tidak bisa di-parse Go (mis.
+  grup hex bernol berlebih `2001:db8::00001`) tidak pernah menjadi kunci
+  mentah: kunci jatuh ke alamat koneksi, lalu ke satu bucket bersama.
 - Bila proxy-nya **Next.js `rewrites`** (Topologi B di `docs/DEPLOYMENT.md`),
   Next.js tidak menyetel `X-Real-IP` dan meneruskan header kiriman klien
   **apa adanya** — termasuk `X-Real-IP` palsu. Topologi itu **wajib** punya

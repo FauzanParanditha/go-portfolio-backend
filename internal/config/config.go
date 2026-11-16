@@ -155,16 +155,28 @@ const (
 	minTrustedPrefixIPv6 = 32 // /32 = alokasi tipikal satu ISP
 )
 
+// Batas terlebar rentang proxy yang MEMUAT alamat publik sebelum memicu
+// peringatan. Rentang publik selebar ini berisi mesin milik orang lain (mis.
+// seluruh blok cloud/ISP), dan siapa pun di dalamnya bisa memalsukan header IP.
+// Hanya peringatan karena masih sah (mis. blok IP milik sendiri).
+const (
+	publicWarnPrefixIPv4 = 24
+	publicWarnPrefixIPv6 = 64
+)
+
 // trustedProxyEntry adalah hasil parse satu entri TRUSTED_PROXIES.
 type trustedProxyEntry struct {
 	raw string
 	// canonical adalah bentuk yang diberikan ke Fiber: IP tunggal dalam bentuk
 	// kanonik net.IP.String(), atau CIDR apa adanya (Fiber mem-parse sendiri).
+	// SELALU kosong bila problem terisi: entri bermasalah tidak pernah sampai
+	// ke Fiber, di environment mana pun.
 	canonical string
-	// problem diisi bila entri harus ditolak (fatal di produksi).
+	// problem diisi bila entri harus ditolak (fatal di produksi, dibuang dari
+	// FiberTrustedProxies di semua environment).
 	problem string
-	// warning diisi bila entri sah tapi kemungkinan besar salah maksud.
-	warning string
+	// warnings diisi bila entri sah tapi kemungkinan besar salah maksud.
+	warnings []string
 }
 
 // parseTrustedProxy memeriksa satu entri TRUSTED_PROXIES.
@@ -191,7 +203,6 @@ func parseTrustedProxy(entry string) trustedProxyEntry {
 		e.problem = "TRUSTED_PROXIES berisi CIDR tidak valid: " + entry
 		return e
 	}
-	e.canonical = entry
 
 	// Prefix efektif. CIDR IPv4-mapped (mis. "::ffff:0:0/96") ditulis sebagai
 	// IPv6 tetapi net.IPNet.Contains mencocokkannya dengan alamat IPv4, jadi
@@ -214,24 +225,68 @@ func parseTrustedProxy(entry string) trustedProxyEntry {
 	case !isIPv4 && ones < minTrustedPrefixIPv6:
 		e.problem = fmt.Sprintf("TRUSTED_PROXIES berisi %s yang terlalu lebar (prefix IPv6 /%d, minimal /%d)", entry, ones, minTrustedPrefixIPv6)
 	}
+	if e.problem != "" {
+		// Fail-safe: canonical dibiarkan kosong agar entri ini TIDAK dipasang
+		// ke Fiber. Dulu canonical diisi sebelum cek lebar, sehingga di luar
+		// produksi (mis. staging) "0.0.0.0/0" tetap aktif dan hanya memicu
+		// peringatan.
+		return e
+	}
+	e.canonical = entry
 
 	// Host bit terisi (mis. "10.0.0.5/24"): Fiber diam-diam memakai jaringan
 	// 10.0.0.0/24, padahal operator mungkin hanya bermaksud satu IP proxy.
 	if !ip.Equal(ipNet.IP) {
-		e.warning = "TRUSTED_PROXIES berisi " + entry + " dengan host bit terisi: yang dipercaya adalah seluruh jaringan " +
-			ipNet.String() + " (tulis " + ipNet.String() + " bila memang itu maksudnya, atau IP tunggal tanpa /prefix)"
+		e.warnings = append(e.warnings, "TRUSTED_PROXIES berisi "+entry+" dengan host bit terisi: yang dipercaya adalah seluruh jaringan "+
+			ipNet.String()+" (tulis "+ipNet.String()+" bila memang itu maksudnya, atau IP tunggal tanpa /prefix)")
+	}
+
+	// Rentang lebar yang memuat alamat publik (mis. "8.0.0.0/8", "2600::/32"):
+	// lolos batas minimal, tapi berisi mesin milik pihak lain yang semuanya
+	// ikut bisa memalsukan header IP.
+	limit, family := publicWarnPrefixIPv6, "IPv6"
+	if isIPv4 {
+		limit, family = publicWarnPrefixIPv4, "IPv4"
+	}
+	if ones < limit && cidrHasPublicAddress(ipNet) {
+		e.warnings = append(e.warnings, fmt.Sprintf(
+			"TRUSTED_PROXIES berisi %s yang memuat alamat publik dengan prefix %s /%d (lebih lebar dari /%d): siapa pun di rentang itu bisa memalsukan header IP klien; tulis IP spesifik proxy",
+			entry, family, ones, limit))
 	}
 	return e
 }
 
+// cidrHasPublicAddress true bila rentang memuat setidaknya satu alamat yang
+// bukan privat (RFC 1918 / ULA fc00::/7), loopback, maupun link-local.
+//
+// Cukup memeriksa alamat pertama dan terakhir: blok non-publik tersebut adalah
+// CIDR yang saling lepas, dan dua CIDR selalu saling memuat atau tidak beririsan.
+// Jadi bila ujung awal dan akhir sama-sama non-publik, keduanya berada di blok
+// yang sama dan seluruh rentang ada di dalamnya (rentang yang lolos batas
+// minimal /8 atau /32 terlalu sempit untuk merentang dua blok berbeda).
+func cidrHasPublicAddress(n *net.IPNet) bool {
+	first := n.IP
+	last := make(net.IP, len(first))
+	for i := range first {
+		last[i] = first[i] | ^n.Mask[i]
+	}
+	return isPublicIP(first) || isPublicIP(last)
+}
+
+// isPublicIP true bila ip bukan alamat privat, loopback, atau link-local.
+func isPublicIP(ip net.IP) bool {
+	return !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()
+}
+
 // trustedProxyProblems memeriksa tiap entri TRUSTED_PROXIES. Entri yang tidak
-// bisa di-parse akan diabaikan Fiber tanpa suara, dan rentang yang terlalu
-// lebar membuat header IP bisa dipalsukan, jadi keduanya harus terlihat di sini.
+// bisa di-parse dan rentang yang terlalu lebar dibuang dari Fiber (lihat
+// FiberTrustedProxies), tetapi harus tetap terlihat di sini agar operator tahu
+// proxy-nya tidak dipercaya.
 func (c *Config) trustedProxyProblems() []string {
 	var problems []string
 	for _, entry := range c.TrustedProxies {
 		if p := parseTrustedProxy(entry).problem; p != "" {
-			problems = append(problems, p)
+			problems = append(problems, p+" (entri ini diabaikan)")
 		}
 	}
 	return problems
@@ -239,12 +294,15 @@ func (c *Config) trustedProxyProblems() []string {
 
 // FiberTrustedProxies mengembalikan TRUSTED_PROXIES dalam bentuk yang siap
 // diberikan ke fiber.Config.TrustedProxies: IP tunggal dinormalkan ke bentuk
-// kanonik (lihat parseTrustedProxy), entri yang tidak bisa di-parse dibuang
-// (sudah dilaporkan oleh Validate).
+// kanonik (lihat parseTrustedProxy). Entri yang punya problem (tidak bisa
+// di-parse ATAU terlalu lebar) DIBUANG di semua environment, bukan hanya fatal
+// di produksi — di luar produksi Validate cuma memperingatkan, jadi tanpa
+// pembuangan ini "0.0.0.0/0" di staging tetap aktif. Bila semua entri dibuang,
+// tidak ada proxy yang dipercaya dan IP klien diambil dari alamat koneksi.
 func (c *Config) FiberTrustedProxies() []string {
 	out := make([]string, 0, len(c.TrustedProxies))
 	for _, entry := range c.TrustedProxies {
-		if e := parseTrustedProxy(entry); e.canonical != "" {
+		if e := parseTrustedProxy(entry); e.problem == "" && e.canonical != "" {
 			out = append(out, e.canonical)
 		}
 	}
@@ -257,9 +315,7 @@ func (c *Config) FiberTrustedProxies() []string {
 func (c *Config) Warnings() []string {
 	var warnings []string
 	for _, entry := range c.TrustedProxies {
-		if w := parseTrustedProxy(entry).warning; w != "" {
-			warnings = append(warnings, w)
-		}
+		warnings = append(warnings, parseTrustedProxy(entry).warnings...)
 	}
 	return warnings
 }

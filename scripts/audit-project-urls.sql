@@ -27,7 +27,15 @@
 --
 -- Catatan: ini pendekatan regex terhadap url.Parse milik Go. Hasilnya cukup
 -- untuk menemukan pelanggaran nyata (skema berbahaya, //host, spasi, host
--- kosong), tetapi validator Go tetap penentu akhir.
+-- kosong), tetapi validator Go tetap penentu akhir. Dua alasan bersifat
+-- informatif, bukan pasti 422:
+--   - demo_url/repo_url berisi "" : panel admin kini mengirim null untuk field
+--     kosong, jadi edit lewat panel TIDAK kena 422. Tetap layak dirapikan ke
+--     NULL agar data konsisten (klien lain yang mengirim "" apa adanya akan
+--     ditolak).
+--   - escape % : url.Parse Go tidak memeriksa escape di query string, jadi
+--     nilai seperti "https://x/?q=100%" sebenarnya LOLOS validator. Periksa
+--     manual; hanya % di path/host/fragment yang benar-benar ditolak.
 
 BEGIN TRANSACTION READ ONLY;
 
@@ -58,7 +66,7 @@ dinilai AS (
     SELECT n.*,
         CASE
             WHEN n.nilai = '' AND n.jenis = 'http'
-                THEN 'string kosong (API menolak ""; simpan NULL)'
+                THEN 'string kosong (panel mengirim null jadi tidak kena 422; rapikan ke NULL)'
             WHEN n.nilai = '' AND n.jenis = 'gambar_wajib'
                 THEN 'kosong (coverImageUrl wajib diisi saat edit)'
             WHEN n.nilai ~ '[[:cntrl:]]'
@@ -66,7 +74,7 @@ dinilai AS (
             WHEN n.nilai ~ '^[[:space:]]|[[:space:]]$'
                 THEN 'spasi di tepi (tidak dipangkas otomatis)'
             WHEN n.nilai ~ '%([^0-9A-Fa-f]|[0-9A-Fa-f]([^0-9A-Fa-f]|$)|$)'
-                THEN 'escape % tidak valid'
+                THEN 'escape % mencurigakan (bisa false positive bila di query, mis. ?q=100%; periksa manual)'
             -- Path relatif (hanya untuk kolom gambar).
             WHEN n.jenis <> 'http' AND left(n.nilai, 2) = '//'
                 THEN 'URL protocol-relative //host (menunjuk host lain)'
@@ -95,7 +103,8 @@ WHERE alasan IS NOT NULL
 ORDER BY slug, tabel, kolom, baris_id;
 
 -- 2) Ringkasan: jumlah pelanggaran per kolom dan alasan, plus jumlah proyek
---    yang akan kena 422 saat diedit.
+--    yang berpotensi kena 422 saat diedit (alasan "informatif" dan "periksa
+--    manual" belum tentu 422; lihat catatan di atas).
 WITH nilai AS (
     SELECT p.id AS project_id, 'demo_url'::text AS kolom, p.demo_url AS nilai, 'http'::text AS jenis
     FROM projects p WHERE p.demo_url IS NOT NULL
@@ -110,11 +119,11 @@ WITH nilai AS (
 dinilai AS (
     SELECT n.project_id, n.kolom,
         CASE
-            WHEN n.nilai = '' AND n.jenis = 'http' THEN 'string kosong'
+            WHEN n.nilai = '' AND n.jenis = 'http' THEN 'string kosong (informatif)'
             WHEN n.nilai = '' AND n.jenis = 'gambar_wajib' THEN 'kosong (wajib)'
             WHEN n.nilai ~ '[[:cntrl:]]' THEN 'karakter kontrol'
             WHEN n.nilai ~ '^[[:space:]]|[[:space:]]$' THEN 'spasi di tepi'
-            WHEN n.nilai ~ '%([^0-9A-Fa-f]|[0-9A-Fa-f]([^0-9A-Fa-f]|$)|$)' THEN 'escape % tidak valid'
+            WHEN n.nilai ~ '%([^0-9A-Fa-f]|[0-9A-Fa-f]([^0-9A-Fa-f]|$)|$)' THEN 'escape % (periksa manual)'
             WHEN n.jenis <> 'http' AND left(n.nilai, 2) = '//' THEN 'protocol-relative'
             WHEN n.jenis <> 'http' AND left(n.nilai, 2) = '/' || chr(92) THEN 'protocol-relative'
             WHEN n.jenis <> 'http' AND left(n.nilai, 1) = '/' THEN NULL

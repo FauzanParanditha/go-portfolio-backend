@@ -320,3 +320,50 @@ func TestCORSMengeksposRetryAfterPada429(t *testing.T) {
 		t.Error("respons 429 seharusnya membawa header Retry-After")
 	}
 }
+
+// Regresi N3(a): entri TRUSTED_PROXIES yang bermasalah dibuang di SEMUA
+// environment. Dulu di luar produksi (mis. staging) "0.0.0.0/0" tetap dipasang
+// ke Fiber dan hanya memicu peringatan, sehingga siapa pun bisa memalsukan
+// X-Real-IP. Sekarang entri itu diabaikan: header palsu tidak berpengaruh dan
+// semua request berbagi jatah alamat koneksi.
+func TestTrustedProxyBermasalahDibuangDiLuarProduksi(t *testing.T) {
+	for _, entry := range []string{"0.0.0.0/0", "::ffff:0:0/96", "0.0.0.0/1", "::/0"} {
+		t.Run(entry, func(t *testing.T) {
+			cfg := newTestConfig(t)
+			cfg.AppEnv = "staging"
+			cfg.TrustedProxies = []string{entry}
+			app := newRouter(t, cfg)
+
+			habiskanJatah(t, app, "203.0.113.10")
+
+			if status, _ := postContact(t, app, "/api/v1/contact", "203.0.113.20"); status != http.StatusTooManyRequests {
+				t.Fatalf("%s seharusnya diabaikan (X-Real-IP palsu tak berpengaruh): status = %d, mau 429", entry, status)
+			}
+		})
+	}
+}
+
+// Regresi N2 lewat router asli: X-Real-IP dengan grup hex bernol berlebih lolos
+// validasi IP Fiber tetapi ditolak net.ParseIP. Semua variasinya harus berbagi
+// satu jatah (jatuh ke alamat koneksi), bukan mendapat jatah baru masing-masing.
+func TestVariasiPaddingIPv6BerbagiJatahLewatRouter(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.TrustedProxies = []string{"0.0.0.0"}
+	app := newRouter(t, cfg)
+
+	lolos := 0
+	const total = 20
+	for i := 1; i <= total; i++ {
+		ip := fmt.Sprintf("2001:db8:1:2::%05x", i) // mis. "2001:db8:1:2::00001"
+		switch status, body := postContact(t, app, "/api/v1/contact", ip); status {
+		case http.StatusUnprocessableEntity:
+			lolos++
+		case http.StatusTooManyRequests:
+		default:
+			t.Fatalf("status tak terduga %d untuk %q; body=%s", status, ip, string(body))
+		}
+	}
+	if lolos != contactLimit {
+		t.Fatalf("variasi padding harus berbagi satu jatah: %d/%d lolos, mau %d", lolos, total, contactLimit)
+	}
+}

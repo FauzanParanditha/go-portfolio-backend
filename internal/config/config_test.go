@@ -318,3 +318,130 @@ func TestWarningsCIDRDenganHostBit(t *testing.T) {
 		t.Fatalf("host bit hanya peringatan, Validate seharusnya lolos: %v", err)
 	}
 }
+
+// N3(a): entri bermasalah tidak pernah sampai ke Fiber, di environment mana
+// pun. Validate di luar produksi hanya memperingatkan, jadi pembuangan inilah
+// yang menjadi pagar sebenarnya.
+func TestFiberTrustedProxiesMembuangEntriBermasalahDiSemuaEnv(t *testing.T) {
+	bermasalah := []string{
+		"0.0.0.0/0",
+		"::/0",
+		"::ffff:0:0/96",  // efektif /0 IPv4
+		"::ffff:0:0/100", // efektif /4
+		"0.0.0.0/1",
+		"10.0.0.0/7",
+		"2001:db8::/31",
+		"fd00::/8",
+		"bukan-ip",
+		"10.0.0.0/99",
+	}
+	sah := []string{"10.0.0.1", "10.0.0.0/8", "2001:db8::/32", "8.0.0.0/8"}
+
+	for _, env := range []string{"development", "staging", "test", "production"} {
+		t.Run(env, func(t *testing.T) {
+			c := baseCfg()
+			c.AppEnv = env
+			c.TrustedProxies = append(append([]string{}, bermasalah...), sah...)
+
+			got := strings.Join(c.FiberTrustedProxies(), "|")
+			want := strings.Join(sah, "|")
+			if got != want {
+				t.Fatalf("FiberTrustedProxies = %q, mau %q", got, want)
+			}
+		})
+	}
+
+	// Problem tetap dilaporkan Validate (beserta keterangan bahwa entrinya
+	// diabaikan) agar operator tahu proxy-nya tidak dipercaya.
+	c := baseCfg()
+	c.AppEnv = "staging"
+	c.TrustedProxies = []string{"0.0.0.0/0"}
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "entri ini diabaikan") {
+		t.Fatalf("Validate harus melaporkan entri yang diabaikan, dapat: %v", err)
+	}
+}
+
+// N3(b): rentang lebar yang memuat alamat publik → peringatan (bukan fatal).
+func TestWarningsRentangPublikLebar(t *testing.T) {
+	cases := []struct {
+		entry    string
+		wantWarn bool
+	}{
+		// Publik & lebih lebar dari /24 (IPv4) atau /64 (IPv6).
+		{"8.0.0.0/8", true},
+		{"203.0.112.0/23", true},
+		{"2600::/32", true},
+		{"2001::/32", true},
+		{"2001:db8:1::/48", true},
+		{"2001:db8:1:2::/63", true},
+		{"::ffff:8.0.0.0/104", true}, // IPv4-mapped, efektif /8
+		// Rentang yang melampaui blok privat ke alamat publik: 172.0.0.0/11
+		// memuat 172.16.0.0/12 sekaligus 172.0.x.x (publik); 192.168.0.0/15
+		// memuat 192.169.x.x (publik).
+		{"172.0.0.0/11", true},
+		{"192.168.0.0/15", true},
+
+		// Batas: /24 dan /64 tidak kena.
+		{"203.0.113.0/24", false},
+		{"2001:db8:1:2::/64", false},
+		{"203.0.113.10", false}, // IP publik tunggal
+		{"2600::1", false},
+
+		// Privat / loopback / link-local: tidak kena peringatan publik.
+		{"10.0.0.0/8", false},
+		{"172.16.0.0/12", false},
+		{"192.168.0.0/16", false},
+		{"127.0.0.0/8", false},
+		{"169.254.0.0/16", false},
+		{"fd00::/32", false},
+		{"fe80::/10", false},
+		{"::ffff:10.0.0.0/104", false},
+
+		// Bermasalah (dibuang): tidak menambah peringatan, sudah jadi problem.
+		{"0.0.0.0/0", false},
+		{"2600::/31", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.entry, func(t *testing.T) {
+			c := baseCfg()
+			c.TrustedProxies = []string{tc.entry}
+			w := c.Warnings()
+			if tc.wantWarn {
+				if len(w) != 1 || !strings.Contains(w[0], "alamat publik") {
+					t.Fatalf("mau satu peringatan alamat publik, dapat: %v", w)
+				}
+				return
+			}
+			for _, msg := range w {
+				if strings.Contains(msg, "alamat publik") {
+					t.Fatalf("tidak boleh ada peringatan alamat publik, dapat: %v", w)
+				}
+			}
+		})
+	}
+
+	// Peringatan publik tidak boleh menjadi galat Validate, juga di produksi.
+	c := baseCfg()
+	c.AppEnv = "production"
+	c.CookieSecure = true
+	c.AppPublicURL = "https://api.example.com"
+	c.TrustedProxies = []string{"8.0.0.0/8", "2600::/32"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("rentang publik lebar hanya peringatan, Validate seharusnya lolos: %v", err)
+	}
+	if got := len(c.Warnings()); got != 2 {
+		t.Fatalf("mau 2 peringatan, dapat %d: %v", got, c.Warnings())
+	}
+}
+
+// Satu entri bisa memicu dua peringatan sekaligus (host bit + rentang publik).
+func TestWarningsHostBitDanPublikSekaligus(t *testing.T) {
+	c := baseCfg()
+	c.TrustedProxies = []string{"8.8.8.8/8"}
+	w := strings.Join(c.Warnings(), "\n")
+	if !strings.Contains(w, "host bit") || !strings.Contains(w, "alamat publik") {
+		t.Fatalf("mau peringatan host bit DAN alamat publik, dapat: %q", w)
+	}
+}
