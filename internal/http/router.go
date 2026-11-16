@@ -112,7 +112,8 @@ func applyProxyConfig(fc *fiber.Config, cfg *config.Config) {
 	}
 	fc.ProxyHeader = cfg.ResolvedProxyHeader()
 	fc.EnableTrustedProxyCheck = true
-	fc.TrustedProxies = cfg.TrustedProxies
+	// Bentuk kanonik: Fiber mencocokkan IP tunggal sebagai string persis.
+	fc.TrustedProxies = cfg.FiberTrustedProxies()
 	fc.EnableIPValidation = true
 }
 

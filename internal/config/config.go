@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 
@@ -146,29 +147,121 @@ func (c *Config) ResolvedProxyHeader() string {
 	return DefaultProxyHeader
 }
 
+// Batas terlebar rentang proxy yang masih masuk akal. Proxy tepercaya adalah
+// segelintir mesin milik sendiri; rentang selebar ini (apalagi lebih) hampir
+// pasti salah ketik dan membuat header IP bisa dipalsukan dari luar.
+const (
+	minTrustedPrefixIPv4 = 8  // /8 = 16 juta alamat
+	minTrustedPrefixIPv6 = 32 // /32 = alokasi tipikal satu ISP
+)
+
+// trustedProxyEntry adalah hasil parse satu entri TRUSTED_PROXIES.
+type trustedProxyEntry struct {
+	raw string
+	// canonical adalah bentuk yang diberikan ke Fiber: IP tunggal dalam bentuk
+	// kanonik net.IP.String(), atau CIDR apa adanya (Fiber mem-parse sendiri).
+	canonical string
+	// problem diisi bila entri harus ditolak (fatal di produksi).
+	problem string
+	// warning diisi bila entri sah tapi kemungkinan besar salah maksud.
+	warning string
+}
+
+// parseTrustedProxy memeriksa satu entri TRUSTED_PROXIES.
+//
+// IP tunggal dinormalkan karena Fiber mencocokkannya sebagai string PERSIS
+// dengan RemoteIP().String() (app.handleTrustedProxy, Ctx.IsProxyTrusted).
+// Tanpa normalisasi, "::ffff:10.0.0.5" (tercetak "10.0.0.5") atau "FD00::1"
+// (tercetak "fd00::1") tidak pernah cocok dan proxy diam-diam tidak dipercaya.
+func parseTrustedProxy(entry string) trustedProxyEntry {
+	e := trustedProxyEntry{raw: entry}
+
+	if !strings.Contains(entry, "/") {
+		ip := net.ParseIP(entry)
+		if ip == nil {
+			e.problem = "TRUSTED_PROXIES berisi IP tidak valid: " + entry
+			return e
+		}
+		e.canonical = ip.String()
+		return e
+	}
+
+	ip, ipNet, err := net.ParseCIDR(entry)
+	if err != nil {
+		e.problem = "TRUSTED_PROXIES berisi CIDR tidak valid: " + entry
+		return e
+	}
+	e.canonical = entry
+
+	// Prefix efektif. CIDR IPv4-mapped (mis. "::ffff:0:0/96") ditulis sebagai
+	// IPv6 tetapi net.IPNet.Contains mencocokkannya dengan alamat IPv4, jadi
+	// lebarnya harus dihitung di ruang IPv4: ones-96. Tanpa ini "::ffff:0:0/96"
+	// terlihat seperti /96 yang sempit padahal mempercayai SEMUA IPv4.
+	ones, bits := ipNet.Mask.Size()
+	isIPv4 := bits == 32
+	if bits == 128 && ipNet.IP.To4() != nil {
+		isIPv4 = true
+		ones -= 96
+	}
+
+	switch {
+	case ones == 0:
+		// /0 = mempercayai SEMUA alamat: siapa pun bisa memalsukan header IP
+		// dan mengakali rate limit (termasuk login).
+		e.problem = "TRUSTED_PROXIES berisi " + entry + " yang mempercayai semua alamat (header IP klien bisa dipalsukan siapa pun)"
+	case isIPv4 && ones < minTrustedPrefixIPv4:
+		e.problem = fmt.Sprintf("TRUSTED_PROXIES berisi %s yang terlalu lebar (prefix IPv4 efektif /%d, minimal /%d)", entry, ones, minTrustedPrefixIPv4)
+	case !isIPv4 && ones < minTrustedPrefixIPv6:
+		e.problem = fmt.Sprintf("TRUSTED_PROXIES berisi %s yang terlalu lebar (prefix IPv6 /%d, minimal /%d)", entry, ones, minTrustedPrefixIPv6)
+	}
+
+	// Host bit terisi (mis. "10.0.0.5/24"): Fiber diam-diam memakai jaringan
+	// 10.0.0.0/24, padahal operator mungkin hanya bermaksud satu IP proxy.
+	if !ip.Equal(ipNet.IP) {
+		e.warning = "TRUSTED_PROXIES berisi " + entry + " dengan host bit terisi: yang dipercaya adalah seluruh jaringan " +
+			ipNet.String() + " (tulis " + ipNet.String() + " bila memang itu maksudnya, atau IP tunggal tanpa /prefix)"
+	}
+	return e
+}
+
 // trustedProxyProblems memeriksa tiap entri TRUSTED_PROXIES. Entri yang tidak
-// bisa di-parse akan diabaikan Fiber tanpa suara, jadi harus terlihat di sini.
+// bisa di-parse akan diabaikan Fiber tanpa suara, dan rentang yang terlalu
+// lebar membuat header IP bisa dipalsukan, jadi keduanya harus terlihat di sini.
 func (c *Config) trustedProxyProblems() []string {
 	var problems []string
 	for _, entry := range c.TrustedProxies {
-		if strings.Contains(entry, "/") {
-			_, ipNet, err := net.ParseCIDR(entry)
-			if err != nil {
-				problems = append(problems, "TRUSTED_PROXIES berisi CIDR tidak valid: "+entry)
-				continue
-			}
-			// /0 = mempercayai SEMUA alamat: siapa pun bisa memalsukan header
-			// IP dan mengakali rate limit (termasuk login).
-			if ones, _ := ipNet.Mask.Size(); ones == 0 {
-				problems = append(problems, "TRUSTED_PROXIES berisi "+entry+" yang mempercayai semua alamat (header IP klien bisa dipalsukan siapa pun)")
-			}
-			continue
-		}
-		if net.ParseIP(entry) == nil {
-			problems = append(problems, "TRUSTED_PROXIES berisi IP tidak valid: "+entry)
+		if p := parseTrustedProxy(entry).problem; p != "" {
+			problems = append(problems, p)
 		}
 	}
 	return problems
+}
+
+// FiberTrustedProxies mengembalikan TRUSTED_PROXIES dalam bentuk yang siap
+// diberikan ke fiber.Config.TrustedProxies: IP tunggal dinormalkan ke bentuk
+// kanonik (lihat parseTrustedProxy), entri yang tidak bisa di-parse dibuang
+// (sudah dilaporkan oleh Validate).
+func (c *Config) FiberTrustedProxies() []string {
+	out := make([]string, 0, len(c.TrustedProxies))
+	for _, entry := range c.TrustedProxies {
+		if e := parseTrustedProxy(entry); e.canonical != "" {
+			out = append(out, e.canonical)
+		}
+	}
+	return out
+}
+
+// Warnings mengembalikan konfigurasi yang sah tetapi kemungkinan salah maksud.
+// Berbeda dengan Validate, ini TIDAK menghentikan aplikasi di produksi; cukup
+// dicatat sebagai peringatan saat start.
+func (c *Config) Warnings() []string {
+	var warnings []string
+	for _, entry := range c.TrustedProxies {
+		if w := parseTrustedProxy(entry).warning; w != "" {
+			warnings = append(warnings, w)
+		}
+	}
+	return warnings
 }
 
 // IsProduction mengembalikan true jika aplikasi berjalan di environment produksi.

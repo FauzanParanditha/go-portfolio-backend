@@ -202,3 +202,19 @@ func TestHeaderDariProxyTakTerdaftarDiabaikan(t *testing.T) {
 		t.Fatalf("header dari peer tak tepercaya seharusnya diabaikan: status = %d, mau 429", status)
 	}
 }
+
+// Entri IP tunggal dinormalkan sebelum diberikan ke Fiber. Fiber mencocokkan
+// string persis dengan RemoteIP().String() ("0.0.0.0" pada app.Test), jadi
+// tanpa normalisasi "::ffff:0.0.0.0" tidak pernah cocok dan X-Real-IP diabaikan.
+func TestTrustedProxyIPv4MappedDinormalkan(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.TrustedProxies = []string{"::ffff:0.0.0.0"}
+	app := newRouter(t, cfg)
+
+	habiskanJatah(t, app, "203.0.113.10")
+
+	if status, body := postContact(t, app, "/api/v1/contact", "203.0.113.20"); status != http.StatusUnprocessableEntity {
+		t.Fatalf("proxy IPv4-mapped seharusnya dipercaya (jatah per X-Real-IP): status = %d, mau 422; body=%s",
+			status, string(body))
+	}
+}

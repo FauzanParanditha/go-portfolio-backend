@@ -209,6 +209,22 @@ func TestValidateProxyConfig(t *testing.T) {
 		{name: "IP rusak", proxies: []string{"nginx"}, wantErr: "IP tidak valid"},
 		{name: "percaya semua IPv4", proxies: []string{"0.0.0.0/0"}, wantErr: "mempercayai semua alamat"},
 		{name: "percaya semua IPv6", proxies: []string{"::/0"}, wantErr: "mempercayai semua alamat"},
+		// IPv4-mapped /96 = seluruh ruang IPv4 (prefix efektif /0).
+		{name: "IPv4-mapped /96", proxies: []string{"::ffff:0:0/96"}, wantErr: "mempercayai semua alamat"},
+		{name: "IPv4-mapped /100 (efektif /4)", proxies: []string{"::ffff:0:0/100"}, wantErr: "prefix IPv4 efektif /4"},
+		{name: "IPv4 /1 bawah", proxies: []string{"0.0.0.0/1"}, wantErr: "terlalu lebar"},
+		{name: "IPv4 /1 atas", proxies: []string{"128.0.0.0/1"}, wantErr: "terlalu lebar"},
+		{name: "IPv4 /7", proxies: []string{"10.0.0.0/7"}, wantErr: "terlalu lebar"},
+		{name: "IPv6 /1", proxies: []string{"::/1"}, wantErr: "terlalu lebar"},
+		{name: "IPv6 /31", proxies: []string{"2001:db8::/31"}, wantErr: "prefix IPv6 /31"},
+		{name: "rentang lebar di antara entri sah", proxies: []string{"10.0.0.1", "0.0.0.0/1"}, wantErr: "0.0.0.0/1"},
+		// Batas yang masih diterima.
+		{name: "IPv4 /8 tepat di batas", proxies: []string{"10.0.0.0/8"}, wantErr: ""},
+		{name: "IPv4-mapped /104 (efektif /8)", proxies: []string{"::ffff:10.0.0.0/104"}, wantErr: ""},
+		{name: "IPv6 /32 tepat di batas", proxies: []string{"2001:db8::/32"}, wantErr: ""},
+		{name: "IPv6 ULA /8", proxies: []string{"fd00::/8"}, wantErr: "terlalu lebar"},
+		// Host bit hanya peringatan, bukan galat.
+		{name: "CIDR dengan host bit", proxies: []string{"10.0.0.5/24"}, wantErr: ""},
 	}
 
 	for _, tc := range cases {
@@ -228,5 +244,77 @@ func TestValidateProxyConfig(t *testing.T) {
 				t.Fatalf("galat mau memuat %q, dapat: %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+// Rentang terlalu lebar harus FATAL di produksi (pola problems di Validate).
+func TestValidateProxyTerlaluLebarFatalDiProduksi(t *testing.T) {
+	c := baseCfg()
+	c.AppEnv = "production"
+	c.CookieSecure = true
+	c.TrustedProxies = []string{"::ffff:0:0/96"}
+
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "TRUSTED_PROXIES") {
+		t.Fatalf("produksi dengan rentang proxy terlalu lebar harus ditolak, dapat: %v", err)
+	}
+}
+
+// Fiber mencocokkan IP tunggal sebagai string PERSIS dengan
+// RemoteIP().String(), jadi entri harus dinormalkan ke bentuk kanonik.
+func TestFiberTrustedProxiesNormalisasi(t *testing.T) {
+	c := &Config{TrustedProxies: []string{
+		"::ffff:10.0.0.5", // IPv4-mapped → dicetak Go sebagai 10.0.0.5
+		"FD00::1",         // huruf besar → huruf kecil
+		"2001:DB8:0:0:0:0:0:1",
+		"10.0.0.1",
+		"172.20.0.0/16", // CIDR diteruskan apa adanya (Fiber mem-parse sendiri)
+		"bukan-ip",      // tidak valid: dibuang (dilaporkan Validate)
+		"10.0.0.0/99",   // CIDR tidak valid: dibuang
+	}}
+
+	got := strings.Join(c.FiberTrustedProxies(), "|")
+	want := "10.0.0.5|fd00::1|2001:db8::1|10.0.0.1|172.20.0.0/16"
+	if got != want {
+		t.Errorf("FiberTrustedProxies = %q, mau %q", got, want)
+	}
+}
+
+func TestWarningsCIDRDenganHostBit(t *testing.T) {
+	cases := []struct {
+		entry    string
+		wantWarn bool
+	}{
+		{"10.0.0.5/24", true},
+		{"10.0.0.0/24", false},
+		{"fd00::1/64", true},
+		{"fd00::/64", false},
+		{"::ffff:10.0.0.5/120", true},
+		{"10.0.0.5", false}, // IP tunggal tidak punya host bit
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.entry, func(t *testing.T) {
+			c := baseCfg()
+			c.TrustedProxies = []string{tc.entry}
+			w := c.Warnings()
+			if tc.wantWarn {
+				if len(w) != 1 || !strings.Contains(w[0], "host bit") {
+					t.Fatalf("mau satu peringatan host bit, dapat: %v", w)
+				}
+				return
+			}
+			if len(w) != 0 {
+				t.Fatalf("tidak boleh ada peringatan, dapat: %v", w)
+			}
+		})
+	}
+
+	// Peringatan tidak boleh berubah menjadi galat Validate.
+	c := baseCfg()
+	c.AppEnv = "production"
+	c.CookieSecure = true
+	c.TrustedProxies = []string{"10.0.0.5/24"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("host bit hanya peringatan, Validate seharusnya lolos: %v", err)
 	}
 }
