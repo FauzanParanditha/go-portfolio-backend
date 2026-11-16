@@ -12,7 +12,6 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/FauzanParanditha/portfolio-backend/internal/storage"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
@@ -98,7 +97,8 @@ func NewRouter(deps AppDeps) *fiber.App {
 
 // applyProxyConfig membuat c.IP() mengembalikan IP klien asli di balik reverse
 // proxy, sehingga rate limiter per-IP (login, contact, reset) tidak membuat
-// semua klien berbagi satu jatah milik IP proxy.
+// semua klien berbagi satu jatah milik IP proxy. Semua limiter memakai
+// middleware.NewRateLimiter (kunci IPv4 apa adanya, IPv6 per prefix /64).
 //
 // Hanya aktif bila TRUSTED_PROXIES diisi. Header IP dibaca HANYA bila koneksi
 // datang dari proxy tepercaya (EnableTrustedProxyCheck); request langsung dari
@@ -164,13 +164,7 @@ func registerAuthRoutes(app *fiber.App, deps AppDeps) {
 	authHandler := handlers.NewAuthHandler(userRepo, deps.Config, deps.Denylist)
 
 	// Rate limit untuk mencegah brute-force / credential stuffing pada login.
-	loginLimiter := limiter.New(limiter.Config{
-		Max:        10,
-		Expiration: 1 * time.Minute,
-		LimitReached: func(c *fiber.Ctx) error {
-			return fiber.NewError(http.StatusTooManyRequests, "too many login attempts, please try again later")
-		},
-	})
+	loginLimiter := middleware.NewRateLimiter(10, 1*time.Minute, "too many login attempts, please try again later")
 
 	api.Post("/auth/login", loginLimiter, authHandler.Login)
 
@@ -216,22 +210,10 @@ func registerPasswordResetRoutes(app *fiber.App, deps AppDeps) {
 
 	// Lebih ketat daripada login: setiap request yang lolos MENGIRIM email, jadi
 	// endpoint ini bisa disalahgunakan untuk membanjiri inbox orang lain.
-	forgotLimiter := limiter.New(limiter.Config{
-		Max:        5,
-		Expiration: 1 * time.Minute,
-		LimitReached: func(c *fiber.Ctx) error {
-			return fiber.NewError(http.StatusTooManyRequests, "too many reset requests, please try again later")
-		},
-	})
+	forgotLimiter := middleware.NewRateLimiter(5, 1*time.Minute, "too many reset requests, please try again later")
 
 	// Menahan brute-force penebakan token reset.
-	resetLimiter := limiter.New(limiter.Config{
-		Max:        10,
-		Expiration: 1 * time.Minute,
-		LimitReached: func(c *fiber.Ctx) error {
-			return fiber.NewError(http.StatusTooManyRequests, "too many attempts, please try again later")
-		},
-	})
+	resetLimiter := middleware.NewRateLimiter(10, 1*time.Minute, "too many attempts, please try again later")
 
 	api.Post("/auth/forgot-password", forgotLimiter, handler.ForgotPassword)
 	api.Post("/auth/reset-password", resetLimiter, handler.ResetPassword)
@@ -324,13 +306,7 @@ func registerPublicContactRoutes(app *fiber.App, deps AppDeps) {
 	// Endpoint publik tanpa auth yang MENULIS ke database (dan tampil di inbox
 	// admin): tanpa batas, siapa pun bisa membanjirinya dengan spam. 5/menit per
 	// IP cukup longgar untuk pengunjung asli yang salah ketik lalu kirim ulang.
-	contactLimiter := limiter.New(limiter.Config{
-		Max:        5,
-		Expiration: 1 * time.Minute,
-		LimitReached: func(c *fiber.Ctx) error {
-			return fiber.NewError(http.StatusTooManyRequests, "too many messages, please try again later")
-		},
-	})
+	contactLimiter := middleware.NewRateLimiter(5, 1*time.Minute, "too many messages, please try again later")
 
 	// Satu instance limiter dipakai KEDUA route, sehingga jatahnya bersama —
 	// berganti-ganti antara /contact dan alias-nya tidak menggandakan kuota.

@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -216,5 +217,65 @@ func TestTrustedProxyIPv4MappedDinormalkan(t *testing.T) {
 	if status, body := postContact(t, app, "/api/v1/contact", "203.0.113.20"); status != http.StatusUnprocessableEntity {
 		t.Fatalf("proxy IPv4-mapped seharusnya dipercaya (jatah per X-Real-IP): status = %d, mau 422; body=%s",
 			status, string(body))
+	}
+}
+
+// postJSONVia mengirim body `{}` (selalu gagal validasi → 422 bila lolos
+// limiter) ke path mana pun dengan X-Real-IP tertentu.
+func postJSONVia(t *testing.T, app *fiber.App, path, realIP string) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Real-IP", realIP)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test error: %v", err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// SEMUA limiter (login, forgot, reset, contact) memakai kunci bersama: IPv6
+// dikelompokkan per /64. Dua alamat berbeda dalam /64 yang sama berbagi jatah;
+// /64 lain tetap punya jatah sendiri. Tanpa ini satu pelanggan IPv6 bisa memutar
+// ~2^64 alamat untuk mengakali limit login.
+func TestSemuaLimiterMengunciIPv6PerSlash64(t *testing.T) {
+	cases := []struct {
+		path string
+		max  int
+	}{
+		{"/api/v1/auth/login", 10},
+		{"/api/v1/auth/forgot-password", 5},
+		{"/api/v1/auth/reset-password", 10},
+		{"/api/v1/contact", 5},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			cfg := newTestConfig(t)
+			cfg.TrustedProxies = []string{"0.0.0.0"}
+			app := newRouter(t, cfg)
+
+			// Habiskan jatah dengan alamat yang BERBEDA-BEDA di /64 yang sama.
+			for i := 1; i <= tc.max; i++ {
+				ip := fmt.Sprintf("2001:db8:1:2::%x", i)
+				if status := postJSONVia(t, app, tc.path, ip); status != http.StatusUnprocessableEntity {
+					t.Fatalf("request ke-%d (%s): status = %d, mau 422 (lolos limiter)", i, ip, status)
+				}
+			}
+
+			if status := postJSONVia(t, app, tc.path, "2001:db8:1:2:ffff:ffff:ffff:ffff"); status != http.StatusTooManyRequests {
+				t.Fatalf("alamat lain di /64 yang sama: status = %d, mau 429 (jatah bersama)", status)
+			}
+
+			if status := postJSONVia(t, app, tc.path, "2001:db8:1:3::1"); status != http.StatusUnprocessableEntity {
+				t.Fatalf("/64 berbeda: status = %d, mau 422 (jatah terpisah)", status)
+			}
+
+			// IPv4 tetap dikunci per alamat: klien IPv4 lain tidak terdampak.
+			if status := postJSONVia(t, app, tc.path, "203.0.113.30"); status != http.StatusUnprocessableEntity {
+				t.Fatalf("klien IPv4: status = %d, mau 422", status)
+			}
+		})
 	}
 }
