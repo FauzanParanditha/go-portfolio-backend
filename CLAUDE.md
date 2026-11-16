@@ -105,8 +105,12 @@ has `*_dto.go` files defining request structs with `validate:` tags; map DTO→m
 - `/admin/*` = `AuthJWT` + `RequireRole("admin")`. New admin routes must include both.
 - `JWT_SECRET` must be strong (≥32 chars, non-default); enforced by `cfg.Validate()`.
 - Login (`POST /auth/login`) is rate-limited (10/min) in `registerAuthRoutes`.
-- Global middleware order in `middleware/RegisterGlobal`: recover → helmet (security headers) → requestid →
-  logger → CORS. CORS origins come from env; never pair `*` with credentials.
+- Global middleware order in `middleware/RegisterGlobal`: recover → body-size guard (413, via
+  `Content-Length`) → helmet (security headers) → requestid → `RejectContentEncoding` → logger → CORS.
+  CORS origins come from env; never pair `*` with credentials.
+- Requests with any `Content-Encoding` other than empty/`identity` are rejected with 415
+  (`RejectContentEncoding`) before anything reads the body — Fiber/fasthttp would otherwise decompress
+  without limit (decompression bomb). Nothing before it may call `c.Body()`/`BodyParser`/`FormFile`.
 - Fiber `BodyLimit` is 1MB (set in `NewRouter`).
 - `.env` is gitignored and must stay untracked; `.env.example` documents the keys.
 
