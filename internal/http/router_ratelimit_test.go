@@ -279,3 +279,44 @@ func TestSemuaLimiterMengunciIPv6PerSlash64(t *testing.T) {
 		})
 	}
 }
+
+// Frontend membaca Retry-After dari respons 429 untuk menampilkan "coba lagi
+// dalam N detik". Header itu bukan CORS-safelisted, jadi harus tercantum di
+// Access-Control-Expose-Headers, termasuk pada respons 429 yang dirender error
+// handler pusat (bukan hanya respons sukses).
+func TestCORSMengeksposRetryAfterPada429(t *testing.T) {
+	app := newRouter(t, newTestConfig(t))
+	const origin = "http://localhost:3000" // diizinkan oleh newTestConfig
+
+	kirim := func() *http.Response {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/contact", strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", origin)
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("app.Test error: %v", err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+
+	for i := 1; i <= contactLimit; i++ {
+		if resp := kirim(); resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("request ke-%d: status = %d, mau 422", i, resp.StatusCode)
+		}
+	}
+
+	resp := kirim()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, mau 429", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != origin {
+		t.Errorf("Access-Control-Allow-Origin = %q, mau %q", got, origin)
+	}
+	if got := resp.Header.Get("Access-Control-Expose-Headers"); !strings.Contains(strings.ToLower(got), "retry-after") {
+		t.Errorf("Access-Control-Expose-Headers = %q, harus memuat Retry-After", got)
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Error("respons 429 seharusnya membawa header Retry-After")
+	}
+}
