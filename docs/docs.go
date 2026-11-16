@@ -1346,16 +1346,20 @@ const docTemplate = `{
             ],
             "properties": {
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "message": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 5000
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 100
                 },
                 "subject": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 }
             }
         },
@@ -1682,7 +1686,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "screenshots": {
-                    "description": "Daftar URL gambar: tiap item http(s) absolut atau path yang diawali \"/\".",
+                    "description": "Daftar URL gambar: tiap item http(s) absolut atau path yang diawali \"/\".\nItem \"\" dilewati validasi (omitempty) karena repository memang\nmelewati string kosong saat menyimpan screenshots.",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -1866,7 +1870,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "screenshots": {
-                    "description": "Daftar URL gambar: tiap item http(s) absolut atau path yang diawali \"/\".",
+                    "description": "Daftar URL gambar: tiap item http(s) absolut atau path yang diawali \"/\".\nItem \"\" dilewati validasi (omitempty) karena repository memang\nmelewati string kosong saat menyimpan screenshots.",
                     "type": "array",
                     "items": {
                         "type": "string"

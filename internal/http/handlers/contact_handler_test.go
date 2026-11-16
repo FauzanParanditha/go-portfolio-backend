@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -118,4 +119,74 @@ func TestContactCreateRepoErrorReturns500(t *testing.T) {
 	if status != http.StatusInternalServerError {
 		t.Fatalf("status = %d, mau 500; body=%s", status, string(body))
 	}
+}
+
+// TestContactCreateTerlaluPanjang memastikan tiap field yang melebihi batas
+// panjang ditolak 422 dengan detail per field tanpa menyentuh repo, dan nilai
+// TEPAT di batas tetap diterima. Batas dihitung per karakter (rune), jadi
+// karakter multibyte tidak membuat input sah ikut tertolak.
+func TestContactCreateTerlaluPanjang(t *testing.T) {
+	// emailPanjang membuat email valid dengan total n karakter.
+	emailPanjang := func(n int) string {
+		const domain = "@example.com"
+		return strings.Repeat("a", n-len(domain)) + domain
+	}
+
+	kasus := []struct {
+		nama, field                   string
+		name, email, subject, message string
+	}{
+		{"name 101", "Name", strings.Repeat("n", 101), "budi@example.com", "Halo", "Pesan"},
+		{"email 201", "Email", "Budi", emailPanjang(201), "Halo", "Pesan"},
+		{"subject 201", "Subject", "Budi", "budi@example.com", strings.Repeat("s", 201), "Pesan"},
+		{"message 5001", "Message", "Budi", "budi@example.com", "Halo", strings.Repeat("m", 5001)},
+	}
+
+	for _, k := range kasus {
+		t.Run(k.nama, func(t *testing.T) {
+			repo := &fakeContactRepo{
+				createFn: func(_ context.Context, _ *models.ContactMessage) error {
+					t.Fatal("repo.Create tidak boleh dipanggil saat input terlalu panjang")
+					return nil
+				},
+			}
+			app := newTestApp()
+			app.Post("/contact", handlers.NewContactHandler(repo).Create)
+
+			payload, _ := json.Marshal(map[string]string{
+				"name": k.name, "email": k.email, "subject": k.subject, "message": k.message,
+			})
+			status, body := doJSON(t, app, postJSON(http.MethodPost, "/contact", string(payload)))
+			if status != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, mau 422; body=%s", status, string(body))
+			}
+			details, _ := decode(t, body)["error"].(map[string]any)["details"].(map[string]any)
+			msg, _ := details[k.field].(string)
+			if !strings.HasPrefix(msg, "maksimal ") {
+				t.Errorf("details[%s] = %q, mau pesan 'maksimal N karakter'; details=%v", k.field, msg, details)
+			}
+		})
+	}
+
+	t.Run("tepat di batas diterima", func(t *testing.T) {
+		repo := &fakeContactRepo{
+			createFn: func(_ context.Context, m *models.ContactMessage) error {
+				m.ID = uuid.New()
+				return nil
+			},
+		}
+		app := newTestApp()
+		app.Post("/contact", handlers.NewContactHandler(repo).Create)
+
+		payload, _ := json.Marshal(map[string]string{
+			"name":    strings.Repeat("é", 100), // multibyte: 100 karakter, 200 byte
+			"email":   emailPanjang(200),
+			"subject": strings.Repeat("s", 200),
+			"message": strings.Repeat("m", 5000),
+		})
+		status, body := doJSON(t, app, postJSON(http.MethodPost, "/contact", string(payload)))
+		if status != http.StatusCreated {
+			t.Fatalf("status = %d, mau 201; body=%s", status, string(body))
+		}
+	})
 }

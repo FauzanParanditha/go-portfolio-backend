@@ -104,6 +104,9 @@ func ToFieldErrors(err error) map[string]string {
 				res[field] = "wajib diisi"
 			case "email":
 				res[field] = "format email tidak valid"
+			case "max":
+				// Untuk string, `max` di go-playground menghitung karakter (rune).
+				res[field] = "maksimal " + fe.Param() + " karakter"
 			case "url":
 				res[field] = "format URL tidak valid"
 			case "httpurl":

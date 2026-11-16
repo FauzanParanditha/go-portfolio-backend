@@ -3,12 +3,16 @@ definitions:
   handlers.ContactCreateRequest:
     properties:
       email:
+        maxLength: 200
         type: string
       message:
+        maxLength: 5000
         type: string
       name:
+        maxLength: 100
         type: string
       subject:
+        maxLength: 200
         type: string
     required:
     - email
@@ -231,8 +235,10 @@ definitions:
       role:
         type: string
       screenshots:
-        description: 'Daftar URL gambar: tiap item http(s) absolut atau path yang
-          diawali "/".'
+        description: |-
+          Daftar URL gambar: tiap item http(s) absolut atau path yang diawali "/".
+          Item "" dilewati validasi (omitempty) karena repository memang
+          melewati string kosong saat menyimpan screenshots.
         items:
           type: string
         type: array
@@ -358,8 +364,10 @@ definitions:
       role:
         type: string
       screenshots:
-        description: 'Daftar URL gambar: tiap item http(s) absolut atau path yang
-          diawali "/".'
+        description: |-
+          Daftar URL gambar: tiap item http(s) absolut atau path yang diawali "/".
+          Item "" dilewati validasi (omitempty) karena repository memang
+          melewati string kosong saat menyimpan screenshots.
         items:
           type: string
         type: array
