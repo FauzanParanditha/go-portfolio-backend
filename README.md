@@ -70,6 +70,8 @@ Lihat [`.env.example`](.env.example) untuk daftar lengkap. Variabel penting:
 | `COOKIE_DOMAIN`           | kosong                           | Kosong = host-only. Lihat `docs/DEPLOYMENT.md` |
 | `SMTP_HOST` / `SMTP_FROM` | —                                | Wajib di produksi agar reset password aktif |
 | `PASSWORD_RESET_TTL`      | `3600`                           | Masa berlaku token reset (detik) |
+| `TRUSTED_PROXIES`         | kosong                           | IP/CIDR reverse proxy (dipisah koma). Kosong = header proxy diabaikan. Lihat [Deploy di balik reverse proxy](#deploy-di-balik-reverse-proxy) |
+| `PROXY_HEADER`            | `X-Real-IP`                      | Header IP klien dari proxy; hanya dipakai bila `TRUSTED_PROXIES` diisi |
 | `SEED_ADMIN_EMAIL`        | `admin@example.com`              | Dipakai oleh seeder |
 | `SEED_ADMIN_PASSWORD`     | `password-admin`                 | **Ganti dengan password kuat** |
 | `SEED_SAMPLE_DATA`        | `false`                          | `true` untuk membuat tag & project contoh |
@@ -150,7 +152,7 @@ Base path: `/api/v1`
 | GET    | `/experiences`      | List experience |
 | POST   | `/auth/forgot-password` | Kirim tautan reset password (rate-limited 5/menit) |
 | POST   | `/auth/reset-password`  | Setel password baru dengan token dari email |
-| POST   | `/contact`          | Kirim pesan kontak |
+| POST   | `/contact`          | Kirim pesan kontak (rate-limited 5/menit, berbagi jatah dengan alias `/contact-messages`) |
 
 ### Terautentikasi (JWT)
 
@@ -192,7 +194,8 @@ Beberapa kontrol yang sudah diterapkan:
 - Route `/admin/*` wajib JWT **dan** role `admin` (`AuthJWT` + `RequireRole`).
 - Password di-hash dengan **bcrypt**; field password tidak pernah dikembalikan ke JSON.
 - Validasi konfigurasi saat startup — di `production`, `JWT_SECRET` lemah/default atau CORS `*`+credentials akan **menghentikan** aplikasi.
-- Rate limiting pada endpoint login (anti brute-force) dan reset password (5/menit).
+- Rate limiting per IP pada login (10/menit, anti brute-force), forgot password (5/menit), reset password (10/menit), dan form kontak (5/menit, anti spam). Respons `429` memakai envelope error standar (`code: TOO_MANY_REQUESTS`).
+- URL yang dirender sebagai link (`demoUrl`, `repoUrl`) hanya menerima `http`/`https` dengan host; URL gambar (`coverImageUrl`, `screenshots`) menerima `http`/`https` atau path `/...`. Skema seperti `javascript:`/`data:` ditolak `422` — termasuk lewat `make import`.
 - Token reset password acak 256-bit, disimpan sebagai **hash**, sekali pakai, dan kedaluwarsa; `forgot-password` membalas seragam agar tidak bisa dipakai mengenumerasi email terdaftar.
 - Security headers via `helmet`, batas body 1MB, query parameterized (anti SQL-injection).
 - Request dengan header `Content-Encoding` (gzip/br/deflate/dll., selain `identity`) ditolak **415** sebelum body dibaca — mencegah *decompression bomb*, karena Fiber mendekompresi body tanpa batas dan batas 1MB hanya melihat ukuran terkompresi.
@@ -207,4 +210,107 @@ Beberapa kontrol yang sudah diterapkan:
 5. `CORS_ALLOWED_ORIGINS` di-set ke domain frontend yang spesifik.
 6. Atribut cookie sesi disesuaikan dengan topologi deploy — lihat **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**.
 7. SMTP diisi bila fitur reset password dipakai; tanpa itu endpointnya membalas `503` di produksi.
-8. Reverse proxy di depan backend sebaiknya **juga** menolak request ber-`Content-Encoding` (lapis pertahanan kedua) — contoh konfigurasi di [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#tolak-request-body-terkompresi-di-reverse-proxy).
+8. Bila backend di balik reverse proxy, isi `TRUSTED_PROXIES` (dan pastikan proxy menimpa `X-Real-IP`) — tanpa itu rate limit berlaku untuk semua pengunjung sekaligus. Lihat bagian berikut.
+9. Reverse proxy di depan backend sebaiknya **juga** menolak request ber-`Content-Encoding` (lapis pertahanan kedua) — contoh konfigurasi di [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#tolak-request-body-terkompresi-di-reverse-proxy) dan di contoh nginx di bawah.
+
+### Deploy di balik reverse proxy
+
+Rate limiter memakai IP klien sebagai kunci. Di balik reverse proxy, alamat
+koneksi yang dilihat backend adalah IP **proxy**, sehingga semua pengunjung
+berbagi satu jatah — satu penyerang bisa menghabiskan jatah login 10/menit
+untuk semua orang, termasuk admin.
+
+Perbaikannya dua sisi:
+
+1. **Proxy menimpa header IP klien** dengan alamat peer yang ia lihat. Contoh nginx:
+
+   ```nginx
+   location /api/ {
+       # Lapis kedua anti decompression bomb (lihat checklist no. 9).
+       if ($http_content_encoding !~* "^(identity)?$") {
+           return 415;
+       }
+       proxy_pass http://backend:8080;
+       proxy_set_header Host $host;
+       # WAJIB menimpa (bukan menambah): nilai kiriman klien dibuang.
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-Proto $scheme;
+   }
+   ```
+
+2. **Backend hanya mempercayai header itu dari proxy tersebut:**
+
+   ```sh
+   # IP SPESIFIK proxy sebagaimana dilihat backend, mis. IP container nginx di
+   # jaringan Docker internal, atau 127.0.0.1 bila nginx di host yang sama.
+   TRUSTED_PROXIES=172.18.0.10
+   # PROXY_HEADER=X-Real-IP          # default; ganti bila proxy memakai header lain (mis. CF-Connecting-IP)
+   ```
+
+3. **Port backend tidak dipublikasikan ke internet.** Hanya proxy yang boleh
+   menjangkau backend: bind ke `127.0.0.1` atau pakai jaringan Docker internal.
+
+   ```yaml
+   # docker-compose.yml
+   services:
+     backend:
+       # JANGAN: ports: ["8080:8080"]  (terbuka ke internet)
+       ports: ["127.0.0.1:8080:8080"]  # atau hapus `ports` sama sekali dan
+                                        # biarkan nginx menjangkau via jaringan internal
+       networks: [internal]
+     nginx:
+       ports: ["80:80", "443:443"]
+       networks:
+         internal:
+           ipv4_address: 172.18.0.10    # IP tetap → bisa ditulis di TRUSTED_PROXIES
+   networks:
+     internal:
+       ipam:
+         config: [{ subnet: 172.18.0.0/24 }]
+   ```
+
+Header IP **hanya** dibaca bila koneksi datang dari alamat di `TRUSTED_PROXIES`;
+request langsung dari alamat lain tetap memakai alamat koneksinya, jadi header
+palsu tidak berpengaruh. Nilai header yang bukan IP valid juga diabaikan.
+
+> ⚠️ **Jangan percayai CIDR Docker yang lebar seperti `172.16.0.0/12`.** Bila
+> port backend dipublikasikan dan Docker memakai `userland-proxy` (default),
+> koneksi dari internet ke port itu bisa terlihat datang dari gateway bridge
+> (mis. `172.17.0.1`). Dengan `172.16.0.0/12` di `TRUSTED_PROXIES`, penyerang
+> dari internet ikut "tepercaya" dan bebas memalsukan `X-Real-IP`. Tulis IP
+> spesifik proxy, dan jangan publikasikan port backend.
+
+Hal yang perlu diperhatikan:
+
+- Jangan pakai `X-Forwarded-For` bila proxy **menambahkan** (append, mis. nginx
+  `$proxy_add_x_forwarded_for`) — backend mengambil entri paling kiri, yang
+  dikendalikan klien. `X-Real-IP $remote_addr` aman karena menimpa.
+- Jangan isi `0.0.0.0/0` / `::/0` — sama dengan mempercayai semua orang.
+  `cfg.Validate()` menolaknya (fatal di produksi), begitu pula rentang yang
+  lebih lebar dari `/8` (IPv4) atau `/32` (IPv6), termasuk bentuk IPv4-mapped
+  seperti `::ffff:0:0/96` (= seluruh IPv4), entri yang tidak bisa di-parse, dan
+  `PROXY_HEADER` yang diisi tanpa `TRUSTED_PROXIES`. Di environment mana pun
+  (juga dev/staging yang hanya memperingatkan), entri bermasalah tersebut
+  **dibuang** dan tidak pernah dipercaya Fiber.
+- Rentang yang memuat alamat **publik** dengan prefix lebih lebar dari `/24`
+  (IPv4) atau `/64` (IPv6), mis. `8.0.0.0/8` atau `2600::/32`, memicu
+  peringatan saat start: semua mesin di rentang itu bisa memalsukan header IP.
+  Rentang privat (`10.0.0.0/8`, `172.16.0.0/12`) tidak kena peringatan ini,
+  tetapi IP spesifik tetap lebih aman (lihat catatan Docker di atas).
+- CIDR dengan host bit terisi (mis. `10.0.0.5/24`) memicu peringatan saat
+  start: yang dipercaya adalah seluruh `10.0.0.0/24`. Tulis IP tunggal bila
+  maksudnya satu proxy.
+- IP tunggal dinormalkan otomatis (`::ffff:10.0.0.5` → `10.0.0.5`,
+  `FD00::1` → `fd00::1`), karena Fiber mencocokkannya sebagai string persis.
+- Kunci rate limit: IPv4 per alamat, IPv6 per prefix `/64` (satu pelanggan
+  IPv6 tidak bisa memutar alamat di subnet-nya untuk mendapat jatah baru).
+  Nilai header yang lolos validasi Fiber tetapi tidak bisa di-parse Go (mis.
+  grup hex bernol berlebih `2001:db8::00001`) tidak pernah menjadi kunci
+  mentah: kunci jatuh ke alamat koneksi, lalu ke satu bucket bersama.
+- Bila proxy-nya **Next.js `rewrites`** (Topologi B di `docs/DEPLOYMENT.md`),
+  Next.js tidak menyetel `X-Real-IP` dan meneruskan header kiriman klien
+  **apa adanya** — termasuk `X-Real-IP` palsu. Topologi itu **wajib** punya
+  nginx/Caddy di depan yang menimpa `X-Real-IP`; barulah isi `TRUSTED_PROXIES`
+  dengan IP server Next.js. Tanpa itu, biarkan `TRUSTED_PROXIES` kosong dan
+  terima bahwa semua pengunjung berbagi satu jatah rate limit.
+- Tanpa proxy sama sekali, biarkan `TRUSTED_PROXIES` kosong.

@@ -59,7 +59,7 @@ Berkas boleh berbentuk `{"projects": [...]}` atau array telanjang.
 | `slug` | string | **ya** | URL-safe, huruf kecil, tanda hubung. Jadi kunci upsert dan alamat halaman `/projects/<slug>` |
 | `shortDesc` | string | **ya** | 1–2 kalimat. Tampil di kartu daftar proyek |
 | `longDescription` | string | tidak | Deskripsi panjang di halaman detail |
-| `coverImageUrl` | string | tidak | URL gambar cover. Kosongkan bila belum ada — situs memakai gambar cadangan, bukan gambar rusak |
+| `coverImageUrl` | string | tidak | URL gambar cover: `http(s)` absolut atau path diawali `/` (lihat [Aturan URL](#aturan-url)). Kosongkan bila belum ada — situs memakai gambar cadangan, bukan gambar rusak |
 | `category` | string | tidak | mis. `Web App`, `API`, `CLI` |
 | `timeline` | string | tidak | mis. `3 months`, `2025 – 2026` |
 | `role` | string | tidak | mis. `Fullstack Developer` |
@@ -67,13 +67,42 @@ Berkas boleh berbentuk `{"projects": [...]}` atau array telanjang.
 | `solution` | string | tidak | Bagian studi kasus: pendekatannya |
 | `results` | string[] | tidak | Poin hasil terukur. **Yang bisa diperiksa jauh lebih kuat** daripada klaim umum |
 | `technicalDetails` | object | tidak | Objek bebas. Kunci yang dipakai frontend: `backend`, `frontend`, `database`, `deployment`, `architecture` |
-| `demoUrl` | string \| null | tidak | Harus URL valid bila diisi |
-| `repoUrl` | string \| null | tidak | Harus URL valid bila diisi |
-| `screenshots` | string[] | tidak | Daftar URL gambar, urutan = urutan tampil |
+| `demoUrl` | string \| null | tidak | Hanya `http://`/`https://` dengan host bila diisi. `null` atau `""` = tidak ada demo |
+| `repoUrl` | string \| null | tidak | Hanya `http://`/`https://` dengan host bila diisi. `null` atau `""` = tidak ada repo |
+| `screenshots` | string[] | tidak | Daftar URL gambar (`http(s)` atau path `/...`), urutan = urutan tampil. Item `""` dilewati |
 | `features` | string[] | tidak | Daftar fitur, urutan = urutan tampil |
 | `tags` | `{name, type}[]` | tidak | Lihat di bawah |
 | `isFeatured` | boolean | tidak | `true` = ikut tampil di beranda (beranda mengambil 6 teratas) |
 | `sortOrder` | number | tidak | Makin kecil makin dulu |
+
+### Aturan URL
+
+Nilai URL dirender situs sebagai `href`/`src`, jadi importer menolak apa pun
+selain `http`/`https`. Aturannya sama dengan panel admin, dan diperiksa untuk
+seluruh berkas sebelum ada yang ditulis (juga saat `-dry`).
+
+| Field | Diterima |
+| ----- | -------- |
+| `demoUrl`, `repoUrl` | URL absolut `http://` atau `https://` dengan host, mis. `https://github.com/x/y` |
+| `coverImageUrl`, tiap item `screenshots` | Sama seperti di atas, **atau** path relatif terhadap root situs yang diawali `/`, mis. `/images/cover.webp` |
+
+Yang **ditolak**:
+
+- Skema lain: `javascript:`, `data:`, `file:`, `ftp:`, `mailto:`, dst. (tidak
+  peka huruf besar/kecil).
+- URL protocol-relative `//host/...` (dan `/\host/...`): sebenarnya menunjuk
+  host lain, jadi tidak dianggap path lokal.
+- URL tanpa host, mis. `https://` atau `http:contoh.com`.
+- Path gambar tanpa `/` di depan, mis. `images/a.png`.
+- **Spasi di tepi**, mis. `" https://x.com"` atau `"/images/a.png "`. Nilai
+  tidak dipangkas otomatis; rapikan di berkas.
+
+Yang **dilewati** (bukan galat): `demoUrl`/`repoUrl`/`coverImageUrl` yang
+kosong, dan item `screenshots` berisi `""`, yang tidak ikut disimpan. Urutan
+screenshot lain tidak berubah.
+
+Galat menyebut nomor proyek, judul, dan field-nya, mis.
+`proyek #3 ("Portfolio"): URL tidak valid (...): demoUrl, screenshots[1]`.
 
 ### `tags`
 

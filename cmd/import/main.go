@@ -36,6 +36,7 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/logger"
 	"github.com/FauzanParanditha/portfolio-backend/internal/models"
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
+	"github.com/FauzanParanditha/portfolio-backend/internal/validation"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
@@ -101,6 +102,35 @@ func (p projectInput) validate(index int) error {
 	if len(missing) > 0 {
 		return fmt.Errorf("proyek #%d (%q): field wajib kosong: %s",
 			index+1, p.Title, strings.Join(missing, ", "))
+	}
+
+	// Impor tidak lewat DTO handler, jadi aturan URL yang sama diterapkan di
+	// sini secara eksplisit. Tanpa ini, berkas impor menjadi jalan pintas untuk
+	// menyimpan `javascript:` ke demoUrl/repoUrl yang dirender sebagai `href`.
+	var invalid []string
+	for _, f := range []struct {
+		name string
+		val  *string
+	}{{"demoUrl", p.DemoURL}, {"repoUrl", p.RepoURL}} {
+		if f.val != nil && *f.val != "" && !validation.IsHTTPURL(*f.val) {
+			invalid = append(invalid, f.name)
+		}
+	}
+	// coverImageUrl boleh kosong di impor (lihat contoh berkas), tapi bila diisi
+	// harus sumber gambar yang aman.
+	if p.CoverImageURL != "" && !validation.IsImageURL(p.CoverImageURL) {
+		invalid = append(invalid, "coverImageUrl")
+	}
+	// Screenshot "" dilewati, sama seperti DTO handler (dive,omitempty) dan
+	// repository yang tidak menyimpan string kosong.
+	for i, s := range p.Screenshots {
+		if s != "" && !validation.IsImageURL(s) {
+			invalid = append(invalid, fmt.Sprintf("screenshots[%d]", i))
+		}
+	}
+	if len(invalid) > 0 {
+		return fmt.Errorf("proyek #%d (%q): URL tidak valid (hanya http/https, atau path \"/...\" untuk gambar): %s",
+			index+1, p.Title, strings.Join(invalid, ", "))
 	}
 	return nil
 }

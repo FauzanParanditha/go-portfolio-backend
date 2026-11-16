@@ -12,7 +12,6 @@ import (
 	"github.com/FauzanParanditha/portfolio-backend/internal/repository"
 	"github.com/FauzanParanditha/portfolio-backend/internal/storage"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
@@ -28,13 +27,16 @@ type AppDeps struct {
 }
 
 func NewRouter(deps AppDeps) *fiber.App {
-	app := fiber.New(fiber.Config{
+	fiberCfg := fiber.Config{
 		ErrorHandler: NewErrorHandler(),
 		// Batas ini berlaku satu aplikasi penuh, jadi harus cukup untuk berkas
 		// unggahan terbesar. Route selain unggahan tetap dijaga 1 MB oleh guard
 		// di middleware.RegisterGlobal.
 		BodyLimit: deps.Config.UploadMaxBytes + 1*1024*1024, // + slack multipart
-	})
+	}
+	applyProxyConfig(&fiberCfg, deps.Config)
+
+	app := fiber.New(fiberCfg)
 
 	// Denylist token (revocation saat logout). Satu instance dibagikan ke
 	// middleware AuthJWT dan handler auth. Dibuat di sini bila belum di-inject.
@@ -93,6 +95,28 @@ func NewRouter(deps AppDeps) *fiber.App {
 	return app
 }
 
+// applyProxyConfig membuat c.IP() mengembalikan IP klien asli di balik reverse
+// proxy, sehingga rate limiter per-IP (login, contact, reset) tidak membuat
+// semua klien berbagi satu jatah milik IP proxy. Semua limiter memakai
+// middleware.NewRateLimiter (kunci IPv4 apa adanya, IPv6 per prefix /64).
+//
+// Hanya aktif bila TRUSTED_PROXIES diisi. Header IP dibaca HANYA bila koneksi
+// datang dari proxy tepercaya (EnableTrustedProxyCheck); request langsung dari
+// alamat lain tetap memakai remote addr, jadi header palsu tidak berpengaruh.
+// EnableIPValidation memastikan nilai header yang bukan IP valid diabaikan
+// (jatuh ke remote addr) — tanpa itu header kosong/sampah ikut menjadi kunci
+// limiter. Kosong = perilaku lama: selalu remote addr.
+func applyProxyConfig(fc *fiber.Config, cfg *config.Config) {
+	if !cfg.BehindTrustedProxy() {
+		return
+	}
+	fc.ProxyHeader = cfg.ResolvedProxyHeader()
+	fc.EnableTrustedProxyCheck = true
+	// Bentuk kanonik: Fiber mencocokkan IP tunggal sebagai string persis.
+	fc.TrustedProxies = cfg.FiberTrustedProxies()
+	fc.EnableIPValidation = true
+}
+
 func registerHealthRoutes(app *fiber.App, deps AppDeps) {
 	app.Get("/healthz", func(c *fiber.Ctx) error {
 		return c.Status(http.StatusOK).JSON(fiber.Map{
@@ -140,13 +164,7 @@ func registerAuthRoutes(app *fiber.App, deps AppDeps) {
 	authHandler := handlers.NewAuthHandler(userRepo, deps.Config, deps.Denylist)
 
 	// Rate limit untuk mencegah brute-force / credential stuffing pada login.
-	loginLimiter := limiter.New(limiter.Config{
-		Max:        10,
-		Expiration: 1 * time.Minute,
-		LimitReached: func(c *fiber.Ctx) error {
-			return fiber.NewError(http.StatusTooManyRequests, "too many login attempts, please try again later")
-		},
-	})
+	loginLimiter := middleware.NewRateLimiter(10, 1*time.Minute, "too many login attempts, please try again later")
 
 	api.Post("/auth/login", loginLimiter, authHandler.Login)
 
@@ -192,22 +210,10 @@ func registerPasswordResetRoutes(app *fiber.App, deps AppDeps) {
 
 	// Lebih ketat daripada login: setiap request yang lolos MENGIRIM email, jadi
 	// endpoint ini bisa disalahgunakan untuk membanjiri inbox orang lain.
-	forgotLimiter := limiter.New(limiter.Config{
-		Max:        5,
-		Expiration: 1 * time.Minute,
-		LimitReached: func(c *fiber.Ctx) error {
-			return fiber.NewError(http.StatusTooManyRequests, "too many reset requests, please try again later")
-		},
-	})
+	forgotLimiter := middleware.NewRateLimiter(5, 1*time.Minute, "too many reset requests, please try again later")
 
 	// Menahan brute-force penebakan token reset.
-	resetLimiter := limiter.New(limiter.Config{
-		Max:        10,
-		Expiration: 1 * time.Minute,
-		LimitReached: func(c *fiber.Ctx) error {
-			return fiber.NewError(http.StatusTooManyRequests, "too many attempts, please try again later")
-		},
-	})
+	resetLimiter := middleware.NewRateLimiter(10, 1*time.Minute, "too many attempts, please try again later")
 
 	api.Post("/auth/forgot-password", forgotLimiter, handler.ForgotPassword)
 	api.Post("/auth/reset-password", resetLimiter, handler.ResetPassword)
@@ -297,10 +303,17 @@ func registerPublicContactRoutes(app *fiber.App, deps AppDeps) {
 	contactRepo := repository.NewContactMessageRepository(deps.DB)
 	contactHandler := handlers.NewContactHandler(contactRepo)
 
-	api.Post("/contact", contactHandler.Create)
+	// Endpoint publik tanpa auth yang MENULIS ke database (dan tampil di inbox
+	// admin): tanpa batas, siapa pun bisa membanjirinya dengan spam. 5/menit per
+	// IP cukup longgar untuk pengunjung asli yang salah ketik lalu kirim ulang.
+	contactLimiter := middleware.NewRateLimiter(5, 1*time.Minute, "too many messages, please try again later")
+
+	// Satu instance limiter dipakai KEDUA route, sehingga jatahnya bersama —
+	// berganti-ganti antara /contact dan alias-nya tidak menggandakan kuota.
+	api.Post("/contact", contactLimiter, contactHandler.Create)
 	// Alias publik untuk konsistensi penamaan dengan resource admin/contact-messages.
 	// Menunjuk ke handler yang SAMA.
-	api.Post("/contact-messages", contactHandler.Create)
+	api.Post("/contact-messages", contactLimiter, contactHandler.Create)
 }
 
 // Admin contact route

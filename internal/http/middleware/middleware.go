@@ -89,5 +89,10 @@ func RegisterGlobal(app *fiber.App, cfg *config.Config) {
 		AllowMethods:     cfg.CORSAllowedMethods,
 		AllowHeaders:     cfg.CORSAllowedHeaders,
 		AllowCredentials: cfg.CORSAllowCredentials,
+		// Retry-After bukan header respons CORS-safelisted, jadi tanpa ini
+		// browser menyembunyikannya dari JS saat FE dan API beda origin.
+		// Frontend membacanya dari respons 429 untuk menampilkan "coba lagi
+		// dalam N detik". Header lain tidak dibaca FE (requestId ada di body).
+		ExposeHeaders: "Retry-After",
 	}))
 }

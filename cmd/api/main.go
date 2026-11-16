@@ -42,6 +42,12 @@ func main() {
 		}
 		log.Warn().Err(err).Msg("insecure configuration detected (allowed in non-production)")
 	}
+	// Konfigurasi yang sah tapi kemungkinan salah maksud (mis. CIDR proxy dengan
+	// host bit terisi, atau rentang proxy publik yang lebar): tidak fatal, hanya
+	// peringatan di semua environment.
+	for _, w := range cfg.Warnings() {
+		log.Warn().Msg(w)
+	}
 
 	log.Info().
 		Str("env", cfg.AppEnv).
