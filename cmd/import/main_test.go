@@ -137,3 +137,24 @@ func TestValidateMenerimaURLAman(t *testing.T) {
 		t.Fatalf("URL aman seharusnya lolos: %v", err)
 	}
 }
+
+// Screenshot kosong dilewati (konsisten dengan DTO handler dan repository),
+// tapi screenshot tidak kosong di sebelahnya tetap divalidasi.
+func TestValidateScreenshotKosongDilewati(t *testing.T) {
+	p := projectInput{
+		Title: "A", Slug: "a", ShortDesc: "x",
+		Screenshots: []string{"", "/images/1.png", ""},
+	}
+	if err := p.validate(0); err != nil {
+		t.Fatalf("screenshot kosong seharusnya dilewati: %v", err)
+	}
+
+	p.Screenshots = []string{"", "javascript:alert(1)"}
+	err := p.validate(0)
+	if err == nil {
+		t.Fatal("screenshot berbahaya tetap harus ditolak")
+	}
+	if !strings.Contains(err.Error(), "screenshots[1]") || strings.Contains(err.Error(), "screenshots[0]") {
+		t.Errorf("hanya screenshots[1] yang boleh disebut: %v", err)
+	}
+}

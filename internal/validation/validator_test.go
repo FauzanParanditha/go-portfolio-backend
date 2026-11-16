@@ -17,7 +17,7 @@ type opsionalURL struct {
 
 type daftarGambar struct {
 	Cover  string   `validate:"required,imageurl"`
-	Images []string `validate:"dive,imageurl"`
+	Images []string `validate:"dive,omitempty,imageurl"`
 }
 
 func strPtr(s string) *string { return &s }
@@ -47,9 +47,13 @@ func TestIsHTTPURL(t *testing.T) {
 		{"contoh.com", false},    // tanpa skema
 		{"/relatif/saja", false}, // path relatif bukan link valid
 		{"", false},              // kosong
-		{"   ", false},
-		{" https://contoh.com", false}, // spasi di tepi ditolak, bukan dipangkas                // spasi saja
-		{"http://a b.com/%zz", false},  // gagal di-parse
+		{"   ", false},           // spasi saja
+		// Spasi di tepi ditolak, bukan dipangkas. Tag `url` lama menolak spasi
+		// di depan tapi MENERIMA spasi di akhir; aturan ini lebih ketat.
+		{" https://contoh.com", false},
+		{"https://contoh.com/x ", false},
+		{"http:contoh.com", false},    // tanpa "//": tag `url` lama menerimanya, host kosong di sini
+		{"http://a b.com/%zz", false}, // gagal di-parse
 	}
 
 	for _, tc := range cases {
@@ -74,6 +78,7 @@ func TestIsImageURL(t *testing.T) {
 		{"//evil.com/a.png", false},
 		{`/\evil.com/a.png`, false},
 		{"images/a.png", false},
+		{"/images/a.png ", false}, // spasi di tepi juga ditolak untuk path
 		{"", false},
 	}
 
@@ -123,10 +128,12 @@ func TestHTTPURLTagOpsional(t *testing.T) {
 	}
 
 	// Pointer ke "" TIDAK dilewati omitempty (pointer-nya tidak nil) dan tetap
-	// ditolak — sama persis dengan perilaku tag `url` lama, jadi tidak ada
-	// perubahan kontrak bagi klien.
+	// ditolak. Untuk kasus string kosong ini perilakunya sama dengan tag `url`
+	// lama (yang juga menolak ""), jadi klien yang mengirim "" tidak terdampak.
+	// Catatan: secara umum httpurl LEBIH KETAT daripada `url` lama (lihat
+	// komentar di IsHTTPURL), bukan paritas penuh.
 	if err := ValidateStruct(&opsionalURL{Link: strPtr("")}); err == nil {
-		t.Error("pointer ke string kosong seharusnya tetap ditolak (paritas dengan tag url lama)")
+		t.Error("pointer ke string kosong seharusnya tetap ditolak")
 	}
 
 	if err := ValidateStruct(&opsionalURL{Link: strPtr("javascript:alert(1)")}); err == nil {
@@ -158,5 +165,29 @@ func TestImageURLTag(t *testing.T) {
 	}
 	if !strings.Contains(msg, "/") || !strings.Contains(msg, "https://") {
 		t.Errorf("pesan imageurl kurang jelas: %q", msg)
+	}
+}
+
+// Elemen screenshots berisi "" dilewati (omitempty di dalam dive), sesuai
+// kontrak repository yang sengaja melewati string kosong saat menyimpan.
+// Elemen tidak kosong tetap divalidasi.
+func TestImageURLTagElemenKosongDilewati(t *testing.T) {
+	if err := ValidateStruct(&daftarGambar{
+		Cover:  "/images/cover.webp",
+		Images: []string{"", "/images/1.png", ""},
+	}); err != nil {
+		t.Fatalf("elemen kosong seharusnya dilewati: %v", err)
+	}
+
+	err := ValidateStruct(&daftarGambar{
+		Cover:  "/images/cover.webp",
+		Images: []string{"", "javascript:alert(1)"},
+	})
+	if err == nil {
+		t.Fatal("elemen tidak kosong yang berbahaya tetap harus ditolak")
+	}
+	fields := ToFieldErrors(err)
+	if _, ada := fields["Images[1]"]; !ada || len(fields) != 1 {
+		t.Errorf("hanya Images[1] yang boleh gagal, dapat: %v", fields)
 	}
 }

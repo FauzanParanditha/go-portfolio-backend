@@ -33,7 +33,9 @@ type ProjectCreateRequest struct {
 	RepoURL *string `json:"repoUrl" validate:"omitempty,httpurl"`
 
 	// Daftar URL gambar: tiap item http(s) absolut atau path yang diawali "/".
-	Screenshots []string `json:"screenshots" validate:"dive,imageurl"`
+	// Item "" dilewati validasi (omitempty) karena repository memang
+	// melewati string kosong saat menyimpan screenshots.
+	Screenshots []string `json:"screenshots" validate:"dive,omitempty,imageurl"`
 
 	IsFeatured bool     `json:"isFeatured"`
 	SortOrder  int      `json:"sortOrder"`

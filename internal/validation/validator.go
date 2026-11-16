@@ -39,7 +39,11 @@ func mustRegister(v *validator.Validate, tag string, fn validator.Func) {
 // dirender frontend sebagai `href`. Aturan ini menutup celah XSS tersebut.
 func IsHTTPURL(s string) bool {
 	// Nilai berspasi di tepi ditolak (bukan dipangkas) agar yang tersimpan sama
-	// persis dengan yang divalidasi — paritas dengan tag `url` lama.
+	// persis dengan yang divalidasi. Ini SENGAJA lebih ketat daripada tag `url`
+	// lama: tag itu menolak spasi di depan tapi MENERIMA spasi di akhir
+	// ("https://x/y ") dan juga bentuk tanpa "//" seperti "http:example.com"
+	// (host kosong, ditolak di bawah). Klien diharapkan memangkas spasi sebelum
+	// mengirim; backend tidak memangkas diam-diam.
 	if s == "" || s != strings.TrimSpace(s) {
 		return false
 	}

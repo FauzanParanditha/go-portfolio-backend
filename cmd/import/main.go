@@ -121,8 +121,10 @@ func (p projectInput) validate(index int) error {
 	if p.CoverImageURL != "" && !validation.IsImageURL(p.CoverImageURL) {
 		invalid = append(invalid, "coverImageUrl")
 	}
+	// Screenshot "" dilewati, sama seperti DTO handler (dive,omitempty) dan
+	// repository yang tidak menyimpan string kosong.
 	for i, s := range p.Screenshots {
-		if !validation.IsImageURL(s) {
+		if s != "" && !validation.IsImageURL(s) {
 			invalid = append(invalid, fmt.Sprintf("screenshots[%d]", i))
 		}
 	}

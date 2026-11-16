@@ -283,3 +283,30 @@ func TestAdminProjectCreateRejectsUnsafeURL(t *testing.T) {
 		}
 	}
 }
+
+// TestAdminProjectCreateScreenshotKosongDilewati memastikan item "" di
+// screenshots TIDAK memicu 422: repository sengaja melewati string kosong saat
+// menyimpan, jadi validasi DTO (dive,omitempty,imageurl) harus konsisten.
+// Daftar diteruskan apa adanya agar sort_order (= index) tetap sama.
+func TestAdminProjectCreateScreenshotKosongDilewati(t *testing.T) {
+	var gotIn repository.ProjectWriteInput
+	repo := &fakeProjectRepo{
+		createFn: func(_ context.Context, in repository.ProjectWriteInput) (*models.Project, error) {
+			gotIn = in
+			return &models.Project{ID: uuid.New(), Title: in.Project.Title, Slug: in.Project.Slug}, nil
+		},
+	}
+
+	app := newTestApp()
+	app.Post("/admin/projects", handlers.NewAdminProjectHandler(repo).Create)
+
+	body := `{"title":"x","slug":"x","shortDesc":"d","coverImageUrl":"/images/c.png",
+		"screenshots":["", "/images/1.png", ""]}`
+	status, respBody := doJSON(t, app, jsonReq(http.MethodPost, "/admin/projects", body))
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, mau 201; body=%s", status, string(respBody))
+	}
+	if len(gotIn.Screenshots) != 3 || gotIn.Screenshots[1] != "/images/1.png" {
+		t.Errorf("Screenshots diteruskan salah: %q", gotIn.Screenshots)
+	}
+}
