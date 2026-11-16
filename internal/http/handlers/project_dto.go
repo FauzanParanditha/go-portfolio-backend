@@ -6,11 +6,12 @@ import (
 
 // Request body untuk create/update project (dipakai AdminProjectHandler)
 type ProjectCreateRequest struct {
-	Title         string `json:"title" validate:"required"`
-	Slug          string `json:"slug" validate:"required"`
-	ShortDesc     string `json:"shortDesc" validate:"required"`
-	LongDesc      string `json:"longDescription"` // boleh kosong, tapi idealnya diisi
-	CoverImageURL string `json:"coverImageUrl" validate:"required"`
+	Title     string `json:"title" validate:"required"`
+	Slug      string `json:"slug" validate:"required"`
+	ShortDesc string `json:"shortDesc" validate:"required"`
+	LongDesc  string `json:"longDescription"` // boleh kosong, tapi idealnya diisi
+	// URL gambar sampul: http(s) absolut atau path yang diawali "/".
+	CoverImageURL string `json:"coverImageUrl" validate:"required,imageurl"`
 
 	Category string `json:"category"`
 	Timeline string `json:"timeline"`
@@ -22,10 +23,17 @@ type ProjectCreateRequest struct {
 	Results          []string       `json:"results"`          // array bullet hasil
 	TechnicalDetails map[string]any `json:"technicalDetails"` // JSON object
 
-	DemoURL *string `json:"demoUrl" validate:"omitempty,url"`
-	RepoURL *string `json:"repoUrl" validate:"omitempty,url"`
+	// Catatan validasi: demoUrl/repoUrl dirender frontend sebagai `href`, jadi
+	// sengaja BUKAN tag `url` bawaan (yang meloloskan `javascript:`/`data:`).
+	// Lihat validation.IsHTTPURL dan validation.IsImageURL.
 
-	Screenshots []string `json:"screenshots"` // list URL gambar, sederhana dulu
+	// URL demo: hanya http:// atau https:// dengan host.
+	DemoURL *string `json:"demoUrl" validate:"omitempty,httpurl"`
+	// URL repositori: hanya http:// atau https:// dengan host.
+	RepoURL *string `json:"repoUrl" validate:"omitempty,httpurl"`
+
+	// Daftar URL gambar: tiap item http(s) absolut atau path yang diawali "/".
+	Screenshots []string `json:"screenshots" validate:"dive,imageurl"`
 
 	IsFeatured bool     `json:"isFeatured"`
 	SortOrder  int      `json:"sortOrder"`

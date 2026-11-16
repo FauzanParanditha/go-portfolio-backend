@@ -249,3 +249,37 @@ func TestAdminProjectDeleteSuccess(t *testing.T) {
 		t.Errorf("204 seharusnya tanpa body, dapat: %s", string(body))
 	}
 }
+
+// TestAdminProjectCreateRejectsUnsafeURL memastikan demoUrl/repoUrl berskema
+// selain http/https (mis. `javascript:`) ditolak 422 dengan detail per field —
+// tag `url` bawaan dulu meloloskannya, padahal nilainya dirender sebagai href.
+func TestAdminProjectCreateRejectsUnsafeURL(t *testing.T) {
+	repo := &fakeProjectRepo{
+		createFn: func(_ context.Context, _ repository.ProjectWriteInput) (*models.Project, error) {
+			t.Fatal("repo tidak boleh dipanggil saat URL tidak aman")
+			return nil, nil
+		},
+	}
+
+	app := newTestApp()
+	app.Post("/admin/projects", handlers.NewAdminProjectHandler(repo).Create)
+
+	body := `{"title":"x","slug":"x","shortDesc":"d","coverImageUrl":"https://x/c.png",
+		"demoUrl":"javascript:alert(1)","repoUrl":"data:text/html,x",
+		"screenshots":["https://x/1.png","javascript:alert(2)"]}`
+	status, respBody := doJSON(t, app, jsonReq(http.MethodPost, "/admin/projects", body))
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, mau 422; body=%s", status, string(respBody))
+	}
+
+	errObj := decode(t, respBody)["error"].(map[string]any)
+	details, ok := errObj["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("details tidak ada: %v", errObj)
+	}
+	for _, f := range []string{"DemoURL", "RepoURL", "Screenshots[1]"} {
+		if _, ada := details[f]; !ada {
+			t.Errorf("details tidak memuat %s: %v", f, details)
+		}
+	}
+}
