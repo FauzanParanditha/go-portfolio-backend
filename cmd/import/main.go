@@ -21,6 +21,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -84,13 +85,6 @@ type projectInput struct {
 	SortOrder  int  `json:"sortOrder"`
 }
 
-// importFile menerima dua bentuk: objek berkunci "projects", atau array
-// telanjang. Keduanya diterima supaya penulis berkas tidak perlu menghafal
-// bentuk pembungkusnya.
-type importFile struct {
-	Projects []projectInput `json:"projects"`
-}
-
 // validate memeriksa field yang WAJIB ada. Sengaja dijalankan untuk SEMUA entri
 // sebelum satu pun ditulis, supaya berkas yang cacat tidak masuk separuh.
 func (p projectInput) validate(index int) error {
@@ -139,6 +133,20 @@ func main() {
 			log.Fatal().Err(err).Msg("berkas impor tidak valid")
 		}
 	}
+	// Slug ganda dalam satu berkas: karena upsert memakai slug sebagai kunci,
+	// entri terakhir akan menimpa yang sebelumnya tanpa jejak. Ditolak supaya
+	// tidak ada data yang hilang diam-diam.
+	urutanSlug := make(map[string]int, len(projects))
+	for i, p := range projects {
+		slug := strings.ToLower(strings.TrimSpace(p.Slug))
+		if sebelumnya, ada := urutanSlug[slug]; ada {
+			log.Fatal().Msgf(
+				"slug %q dipakai dua kali (proyek #%d dan #%d): upsert akan saling menimpa",
+				p.Slug, sebelumnya+1, i+1)
+		}
+		urutanSlug[slug] = i
+	}
+
 	log.Info().Int("jumlah", len(projects)).Str("berkas", *file).Msg("berkas impor valid")
 
 	if *dry {
@@ -203,18 +211,58 @@ func main() {
 
 // readProjects membaca berkas dan menerima dua bentuk JSON: objek berkunci
 // "projects", atau array telanjang.
+//
+// Field di luar skema DITOLAK, tidak diabaikan. Alasannya konkret: berkas
+// keluaran agen pernah memuat `"visibility": "internal"` — penanda yang, kalau
+// diabaikan diam-diam, membuat proyek internal terbit sebagai proyek publik.
+// Lebih baik impor gagal dan orangnya memutuskan.
 func readProjects(path string) ([]projectInput, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	var wrapped importFile
-	if err := json.Unmarshal(raw, &wrapped); err == nil && len(wrapped.Projects) > 0 {
-		return wrapped.Projects, nil
+	// Dibaca dua tahap: daftar entri mentah dulu, supaya galat field asing bisa
+	// menyebut entri ke berapa — pesan `json: unknown field` sendirian tidak.
+	entries, err := rawEntries(raw)
+	if err != nil {
+		return nil, err
 	}
 
-	var bare []projectInput
+	projects := make([]projectInput, 0, len(entries))
+	for i, entry := range entries {
+		dec := json.NewDecoder(bytes.NewReader(entry))
+		dec.DisallowUnknownFields()
+
+		var p projectInput
+		if err := dec.Decode(&p); err != nil {
+			return nil, fmt.Errorf("proyek #%d: %w", i+1, err)
+		}
+		projects = append(projects, p)
+	}
+	return projects, nil
+}
+
+// rawEntries memisahkan pembungkus dari isinya, menerima objek berkunci
+// "projects" maupun array telanjang.
+func rawEntries(raw []byte) ([]json.RawMessage, error) {
+	var wrapped struct {
+		Projects []json.RawMessage `json:"projects"`
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(&wrapped)
+	switch {
+	case err == nil:
+		return wrapped.Projects, nil
+	case strings.Contains(err.Error(), "unknown field"):
+		// Blok tambahan di akar berkas (mis. `_internal` berisi catatan yang
+		// tidak untuk publik) ditolak, bukan dilewati tanpa suara.
+		return nil, fmt.Errorf("akar berkas: %w", err)
+	}
+
+	var bare []json.RawMessage
 	if err := json.Unmarshal(raw, &bare); err != nil {
 		return nil, fmt.Errorf("JSON tidak dikenali; harap berupa {\"projects\": [...]} atau array proyek: %w", err)
 	}

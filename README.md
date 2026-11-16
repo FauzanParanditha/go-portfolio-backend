@@ -195,6 +195,7 @@ Beberapa kontrol yang sudah diterapkan:
 - Rate limiting pada endpoint login (anti brute-force) dan reset password (5/menit).
 - Token reset password acak 256-bit, disimpan sebagai **hash**, sekali pakai, dan kedaluwarsa; `forgot-password` membalas seragam agar tidak bisa dipakai mengenumerasi email terdaftar.
 - Security headers via `helmet`, batas body 1MB, query parameterized (anti SQL-injection).
+- Request dengan header `Content-Encoding` (gzip/br/deflate/dll., selain `identity`) ditolak **415** sebelum body dibaca — mencegah *decompression bomb*, karena Fiber mendekompresi body tanpa batas dan batas 1MB hanya melihat ukuran terkompresi.
 - Swagger UI hanya aktif di luar produksi.
 
 ### Checklist Produksi
@@ -206,3 +207,4 @@ Beberapa kontrol yang sudah diterapkan:
 5. `CORS_ALLOWED_ORIGINS` di-set ke domain frontend yang spesifik.
 6. Atribut cookie sesi disesuaikan dengan topologi deploy — lihat **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**.
 7. SMTP diisi bila fitur reset password dipakai; tanpa itu endpointnya membalas `503` di produksi.
+8. Reverse proxy di depan backend sebaiknya **juga** menolak request ber-`Content-Encoding` (lapis pertahanan kedua) — contoh konfigurasi di [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#tolak-request-body-terkompresi-di-reverse-proxy).

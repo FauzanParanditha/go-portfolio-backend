@@ -12,7 +12,7 @@ Butuh `.env` terisi (`DB_DSN`) dan migrasi sudah dijalankan (`make migrate-up`).
 
 ---
 
-## Dua sifat yang perlu diketahui
+## Tiga sifat yang perlu diketahui
 
 **Upsert berdasarkan `slug`.** Menjalankan perintah yang sama dua kali tidak
 menghasilkan duplikat — proyek dengan slug yang sudah ada akan **diperbarui**.
@@ -22,6 +22,27 @@ saja setelah disunting.
 **Tag ditulis dengan nama, bukan UUID.** Penulis berkas tidak mungkin tahu UUID.
 Perintah ini mencari tag berdasarkan nama (case-insensitive) dan **membuatnya bila
 belum ada**.
+
+**Field di luar skema ditolak, bukan diabaikan.** Impor gagal — tanpa menulis
+apa pun — bila sebuah entri memuat field yang tidak ada di tabel skema di bawah,
+atau bila ada kunci tambahan di akar berkas selain `projects`.
+
+Ini bukan kerewelan. Berkas keluaran agen pernah memuat `"visibility": "internal"`.
+Bila field itu diabaikan diam-diam, proyek yang ditandai internal akan **terbit
+sebagai proyek publik** — dan tidak ada satu baris keluaran pun yang memberi tahu.
+Pesan galatnya menyebut nama field dan entri ke berapa:
+
+```
+proyek #1: json: unknown field "visibility"
+akar berkas: json: unknown field "_internal"
+```
+
+Kalau memang ingin memuatnya, hapus dulu field tersebut — keputusannya di tangan
+Anda, bukan di tangan parser.
+
+**Slug ganda dalam satu berkas juga ditolak.** Karena kuncinya `slug`, entri
+terakhir akan menimpa entri sebelumnya tanpa jejak. Galatnya menyebut kedua
+nomornya.
 
 Validasi dijalankan untuk **seluruh** entri sebelum satu pun ditulis, sehingga
 berkas yang cacat tidak masuk separuh.
