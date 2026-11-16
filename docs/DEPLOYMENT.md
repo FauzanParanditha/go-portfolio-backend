@@ -77,7 +77,7 @@ beberapa subdomain berbagi satu sesi.
 > kunjungan ke `/admin` akan dilempar ke halaman login.
 >
 > Pilih salah satu:
-> - **Topologi B** (reverse proxy) — cookie jadi first-party di domain FE, gate berfungsi penuh. Paling rapi.
+> - **Topologi B** (reverse proxy) — cookie jadi first-party di domain FE, gate berfungsi penuh. Paling rapi untuk cookie, **dengan syarat** nginx/Caddy di depan (lihat Topologi B).
 > - Set `COOKIE_DOMAIN=.example.com` supaya cookie terkirim juga ke domain FE.
 > - Nonaktifkan gate proxy dan andalkan `AdminGuard` (client-side) + penegakan backend. Aman secara keamanan — `RequireRole("admin")` tetap berjalan — hanya menambah kedip UI sesaat.
 >
@@ -87,7 +87,7 @@ beberapa subdomain berbagi satu sesi.
 
 ---
 
-## Topologi B — satu origin lewat reverse proxy (PALING TAHAN BANTING)
+## Topologi B — satu origin lewat reverse proxy (paling sederhana untuk cookie, butuh nginx/Caddy di depan)
 
 ```
 https://example.com          → frontend
@@ -97,6 +97,31 @@ https://example.com/api/*    → di-proxy ke backend
 FE dan BE tampil sebagai **satu origin**. Tidak ada CORS, tidak ada isu
 `SameSite`, tidak ada cookie pihak ketiga, dan gate `src/proxy.ts` berfungsi
 penuh karena cookie-nya first-party.
+
+> ⚠️ **Syarat wajib: nginx/Caddy di depan Next.js yang MENIMPA `X-Real-IP`.**
+> Next.js 16 `rewrites` meneruskan header `X-Real-IP` dan `X-Forwarded-For`
+> kiriman klien **apa adanya** ke backend. Bila server Next.js dipercaya lewat
+> `TRUSTED_PROXIES` tanpa proxy lain di depannya, siapa pun cukup mengirim
+> `X-Real-IP: <acak>` untuk mendapat jatah rate limit baru di setiap request
+> (termasuk login 10/menit), sehingga limiter tidak berguna.
+>
+> Pilih salah satu, tidak ada jalan tengah:
+>
+> 1. **Ada nginx/Caddy di depan** yang menimpa header dengan alamat peer
+>    (`proxy_set_header X-Real-IP $remote_addr;` atau Caddy
+>    `header_up X-Real-IP {remote_host}`), dan Next.js tidak bisa dijangkau
+>    langsung dari internet. Barulah isi `TRUSTED_PROXIES` dengan IP spesifik
+>    server Next.js (sebagaimana dilihat backend).
+> 2. **Tanpa proxy semacam itu:** biarkan `TRUSTED_PROXIES` **kosong**. Header
+>    diabaikan dan backend memakai alamat koneksi, yaitu IP server Next.js.
+>    Konsekuensinya diterima secara sadar: semua pengunjung **berbagi satu
+>    jatah** untuk setiap limiter per-IP (login 10/menit, forgot 5, reset 10,
+>    contact 5). Satu pengirim spam bisa menghabiskan jatah contact atau login
+>    untuk semua orang, termasuk admin.
+>
+> Dalam kedua kasus, port backend **tidak boleh** dipublikasikan ke internet:
+> bind ke `127.0.0.1` atau jaringan Docker internal saja (lihat README, bagian
+> "Deploy di balik reverse proxy").
 
 **Next.js (`next.config.ts`):**
 
@@ -123,13 +148,16 @@ Pola yang sama berlaku bila reverse proxy-nya Nginx/Caddy/Traefik di depan
 keduanya.
 
 **IP klien untuk rate limit.** Di topologi ini backend melihat IP proxy, bukan
-IP pengunjung, sehingga rate limit (login, contact, reset) menjadi satu jatah
-bersama. Isi `TRUSTED_PROXIES` dengan IP/CIDR proxy dan pastikan proxy MENIMPA
-`X-Real-IP` (nginx: `proxy_set_header X-Real-IP $remote_addr;`). Next.js
-`rewrites` tidak menyetel `X-Real-IP` dan meneruskan header kiriman klien apa
-adanya, jadi server Next.js baru boleh dipercaya bila ada nginx/Caddy di
-depannya yang menimpa header itu. Detail & contoh: bagian "Deploy di balik reverse proxy" di
-`README.md`.
+IP pengunjung. Rantai yang benar:
+
+```
+klien → nginx/Caddy (X-Real-IP = $remote_addr) → Next.js rewrites (meneruskan header) → backend
+                                                  ↑ TRUSTED_PROXIES = IP server Next.js
+```
+
+Isi `TRUSTED_PROXIES` dengan **IP spesifik** hop terakhir sebelum backend
+(server Next.js), bukan CIDR jaringan yang lebar. Detail & contoh: bagian
+"Deploy di balik reverse proxy" di `README.md`.
 
 ---
 
@@ -191,12 +219,40 @@ startup.
 
 1. **Siapkan env** sesuai tabel di atas. `JWT_SECRET` minimal 32 karakter:
    `openssl rand -base64 48`.
-2. **Jalankan migration:** `make migrate-up` (Atlas: hash lalu apply).
-3. **Seed admin pertama:** `make seed` — idempoten, aman diulang.
-4. **Build & jalankan:** `make build` lalu jalankan `bin/portfolio-backend`.
-5. **Verifikasi** dengan langkah di bawah.
+2. **Audit data URL proyek lama (WAJIB sebelum deploy versi dengan validasi
+   URL http/https).** Lihat bagian [Audit URL proyek](#audit-url-proyek-sebelum-deploy).
+3. **Jalankan migration:** `make migrate-up` (Atlas: hash lalu apply).
+4. **Seed admin pertama:** `make seed` — idempoten, aman diulang.
+5. **Build & jalankan:** `make build` lalu jalankan `bin/portfolio-backend`.
+6. **Verifikasi** dengan langkah di bawah.
 
 Swagger UI **tidak** dipasang saat `APP_ENV=production` — itu disengaja.
+
+### Audit URL proyek sebelum deploy
+
+Versi ini memperketat validasi URL proyek: `demoUrl`/`repoUrl` hanya
+`http`/`https` dengan host; `coverImageUrl` dan screenshot boleh juga path
+`/...`; `//host`, `data:`, `javascript:`, dan spasi di tepi ditolak (aturan
+lengkap: `docs/IMPORT-PROYEK.md`, bagian "Aturan URL"). Data lama **tetap
+tampil**, tetapi proyek yang URL-nya melanggar akan kena **`422` saat diedit**
+di panel admin, karena form mengirim ulang semua field.
+
+Jalankan audit read-only terhadap database produksi **sebelum** deploy:
+
+```sh
+psql "$DB_DSN" -f scripts/audit-project-urls.sql
+```
+
+Script hanya berisi `SELECT` di dalam transaksi `READ ONLY` (diakhiri
+`ROLLBACK`), jadi aman dijalankan di produksi. Hasilnya:
+
+1. daftar baris yang melanggar (tabel, id, slug, kolom, nilai, alasan);
+2. ringkasan jumlah per kolom dan alasan.
+
+Bila ada baris yang muncul, perbaiki URL-nya (lewat panel admin versi lama
+sebelum deploy, atau `UPDATE` manual yang ditinjau) **sebelum** atau segera
+setelah deploy. Nilai `javascript:`/`data:` di `demo_url`/`repo_url` adalah
+indikasi stored XSS yang perlu diperiksa asal-usulnya, bukan sekadar dirapikan.
 
 ---
 

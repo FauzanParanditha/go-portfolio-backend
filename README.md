@@ -235,13 +235,44 @@ Perbaikannya dua sisi:
 2. **Backend hanya mempercayai header itu dari proxy tersebut:**
 
    ```sh
-   TRUSTED_PROXIES=10.0.0.5          # IP proxy, atau CIDR jaringan internal mis. 172.16.0.0/12
+   # IP SPESIFIK proxy sebagaimana dilihat backend, mis. IP container nginx di
+   # jaringan Docker internal, atau 127.0.0.1 bila nginx di host yang sama.
+   TRUSTED_PROXIES=172.18.0.10
    # PROXY_HEADER=X-Real-IP          # default; ganti bila proxy memakai header lain (mis. CF-Connecting-IP)
+   ```
+
+3. **Port backend tidak dipublikasikan ke internet.** Hanya proxy yang boleh
+   menjangkau backend: bind ke `127.0.0.1` atau pakai jaringan Docker internal.
+
+   ```yaml
+   # docker-compose.yml
+   services:
+     backend:
+       # JANGAN: ports: ["8080:8080"]  (terbuka ke internet)
+       ports: ["127.0.0.1:8080:8080"]  # atau hapus `ports` sama sekali dan
+                                        # biarkan nginx menjangkau via jaringan internal
+       networks: [internal]
+     nginx:
+       ports: ["80:80", "443:443"]
+       networks:
+         internal:
+           ipv4_address: 172.18.0.10    # IP tetap → bisa ditulis di TRUSTED_PROXIES
+   networks:
+     internal:
+       ipam:
+         config: [{ subnet: 172.18.0.0/24 }]
    ```
 
 Header IP **hanya** dibaca bila koneksi datang dari alamat di `TRUSTED_PROXIES`;
 request langsung dari alamat lain tetap memakai alamat koneksinya, jadi header
 palsu tidak berpengaruh. Nilai header yang bukan IP valid juga diabaikan.
+
+> ⚠️ **Jangan percayai CIDR Docker yang lebar seperti `172.16.0.0/12`.** Bila
+> port backend dipublikasikan dan Docker memakai `userland-proxy` (default),
+> koneksi dari internet ke port itu bisa terlihat datang dari gateway bridge
+> (mis. `172.17.0.1`). Dengan `172.16.0.0/12` di `TRUSTED_PROXIES`, penyerang
+> dari internet ikut "tepercaya" dan bebas memalsukan `X-Real-IP`. Tulis IP
+> spesifik proxy, dan jangan publikasikan port backend.
 
 Hal yang perlu diperhatikan:
 
@@ -249,11 +280,21 @@ Hal yang perlu diperhatikan:
   `$proxy_add_x_forwarded_for`) — backend mengambil entri paling kiri, yang
   dikendalikan klien. `X-Real-IP $remote_addr` aman karena menimpa.
 - Jangan isi `0.0.0.0/0` / `::/0` — sama dengan mempercayai semua orang.
-  `cfg.Validate()` menolaknya (fatal di produksi), begitu pula entri yang tidak
-  bisa di-parse dan `PROXY_HEADER` yang diisi tanpa `TRUSTED_PROXIES`.
+  `cfg.Validate()` menolaknya (fatal di produksi), begitu pula rentang yang
+  lebih lebar dari `/8` (IPv4) atau `/32` (IPv6), termasuk bentuk IPv4-mapped
+  seperti `::ffff:0:0/96` (= seluruh IPv4), entri yang tidak bisa di-parse, dan
+  `PROXY_HEADER` yang diisi tanpa `TRUSTED_PROXIES`.
+- CIDR dengan host bit terisi (mis. `10.0.0.5/24`) memicu peringatan saat
+  start: yang dipercaya adalah seluruh `10.0.0.0/24`. Tulis IP tunggal bila
+  maksudnya satu proxy.
+- IP tunggal dinormalkan otomatis (`::ffff:10.0.0.5` → `10.0.0.5`,
+  `FD00::1` → `fd00::1`), karena Fiber mencocokkannya sebagai string persis.
+- Kunci rate limit: IPv4 per alamat, IPv6 per prefix `/64` (satu pelanggan
+  IPv6 tidak bisa memutar alamat di subnet-nya untuk mendapat jatah baru).
 - Bila proxy-nya **Next.js `rewrites`** (Topologi B di `docs/DEPLOYMENT.md`),
   Next.js tidak menyetel `X-Real-IP` dan meneruskan header kiriman klien
-  **apa adanya** — termasuk `X-Real-IP` palsu. Jangan percayai server Next.js
-  langsung kecuali ada nginx/Caddy di depannya yang menimpa `X-Real-IP`;
-  barulah isi `TRUSTED_PROXIES` dengan IP server Next.js.
+  **apa adanya** — termasuk `X-Real-IP` palsu. Topologi itu **wajib** punya
+  nginx/Caddy di depan yang menimpa `X-Real-IP`; barulah isi `TRUSTED_PROXIES`
+  dengan IP server Next.js. Tanpa itu, biarkan `TRUSTED_PROXIES` kosong dan
+  terima bahwa semua pengunjung berbagi satu jatah rate limit.
 - Tanpa proxy sama sekali, biarkan `TRUSTED_PROXIES` kosong.
