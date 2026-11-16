@@ -70,6 +70,8 @@ Lihat [`.env.example`](.env.example) untuk daftar lengkap. Variabel penting:
 | `COOKIE_DOMAIN`           | kosong                           | Kosong = host-only. Lihat `docs/DEPLOYMENT.md` |
 | `SMTP_HOST` / `SMTP_FROM` | —                                | Wajib di produksi agar reset password aktif |
 | `PASSWORD_RESET_TTL`      | `3600`                           | Masa berlaku token reset (detik) |
+| `TRUSTED_PROXIES`         | kosong                           | IP/CIDR reverse proxy (dipisah koma). Kosong = header proxy diabaikan. Lihat [Deploy di balik reverse proxy](#deploy-di-balik-reverse-proxy) |
+| `PROXY_HEADER`            | `X-Real-IP`                      | Header IP klien dari proxy; hanya dipakai bila `TRUSTED_PROXIES` diisi |
 | `SEED_ADMIN_EMAIL`        | `admin@example.com`              | Dipakai oleh seeder |
 | `SEED_ADMIN_PASSWORD`     | `password-admin`                 | **Ganti dengan password kuat** |
 | `SEED_SAMPLE_DATA`        | `false`                          | `true` untuk membuat tag & project contoh |
@@ -150,7 +152,7 @@ Base path: `/api/v1`
 | GET    | `/experiences`      | List experience |
 | POST   | `/auth/forgot-password` | Kirim tautan reset password (rate-limited 5/menit) |
 | POST   | `/auth/reset-password`  | Setel password baru dengan token dari email |
-| POST   | `/contact`          | Kirim pesan kontak |
+| POST   | `/contact`          | Kirim pesan kontak (rate-limited 5/menit, berbagi jatah dengan alias `/contact-messages`) |
 
 ### Terautentikasi (JWT)
 
@@ -192,7 +194,8 @@ Beberapa kontrol yang sudah diterapkan:
 - Route `/admin/*` wajib JWT **dan** role `admin` (`AuthJWT` + `RequireRole`).
 - Password di-hash dengan **bcrypt**; field password tidak pernah dikembalikan ke JSON.
 - Validasi konfigurasi saat startup — di `production`, `JWT_SECRET` lemah/default atau CORS `*`+credentials akan **menghentikan** aplikasi.
-- Rate limiting pada endpoint login (anti brute-force) dan reset password (5/menit).
+- Rate limiting per IP pada login (10/menit, anti brute-force), forgot password (5/menit), reset password (10/menit), dan form kontak (5/menit, anti spam). Respons `429` memakai envelope error standar (`code: TOO_MANY_REQUESTS`).
+- URL yang dirender sebagai link (`demoUrl`, `repoUrl`) hanya menerima `http`/`https` dengan host; URL gambar (`coverImageUrl`, `screenshots`) menerima `http`/`https` atau path `/...`. Skema seperti `javascript:`/`data:` ditolak `422` — termasuk lewat `make import`.
 - Token reset password acak 256-bit, disimpan sebagai **hash**, sekali pakai, dan kedaluwarsa; `forgot-password` membalas seragam agar tidak bisa dipakai mengenumerasi email terdaftar.
 - Security headers via `helmet`, batas body 1MB, query parameterized (anti SQL-injection).
 - Swagger UI hanya aktif di luar produksi.
@@ -206,3 +209,51 @@ Beberapa kontrol yang sudah diterapkan:
 5. `CORS_ALLOWED_ORIGINS` di-set ke domain frontend yang spesifik.
 6. Atribut cookie sesi disesuaikan dengan topologi deploy — lihat **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**.
 7. SMTP diisi bila fitur reset password dipakai; tanpa itu endpointnya membalas `503` di produksi.
+8. Bila backend di balik reverse proxy, isi `TRUSTED_PROXIES` (dan pastikan proxy menimpa `X-Real-IP`) — tanpa itu rate limit berlaku untuk semua pengunjung sekaligus. Lihat bagian berikut.
+
+### Deploy di balik reverse proxy
+
+Rate limiter memakai IP klien sebagai kunci. Di balik reverse proxy, alamat
+koneksi yang dilihat backend adalah IP **proxy**, sehingga semua pengunjung
+berbagi satu jatah — satu penyerang bisa menghabiskan jatah login 10/menit
+untuk semua orang, termasuk admin.
+
+Perbaikannya dua sisi:
+
+1. **Proxy menimpa header IP klien** dengan alamat peer yang ia lihat. Contoh nginx:
+
+   ```nginx
+   location /api/ {
+       proxy_pass http://backend:8080;
+       proxy_set_header Host $host;
+       # WAJIB menimpa (bukan menambah): nilai kiriman klien dibuang.
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-Proto $scheme;
+   }
+   ```
+
+2. **Backend hanya mempercayai header itu dari proxy tersebut:**
+
+   ```sh
+   TRUSTED_PROXIES=10.0.0.5          # IP proxy, atau CIDR jaringan internal mis. 172.16.0.0/12
+   # PROXY_HEADER=X-Real-IP          # default; ganti bila proxy memakai header lain (mis. CF-Connecting-IP)
+   ```
+
+Header IP **hanya** dibaca bila koneksi datang dari alamat di `TRUSTED_PROXIES`;
+request langsung dari alamat lain tetap memakai alamat koneksinya, jadi header
+palsu tidak berpengaruh. Nilai header yang bukan IP valid juga diabaikan.
+
+Hal yang perlu diperhatikan:
+
+- Jangan pakai `X-Forwarded-For` bila proxy **menambahkan** (append, mis. nginx
+  `$proxy_add_x_forwarded_for`) — backend mengambil entri paling kiri, yang
+  dikendalikan klien. `X-Real-IP $remote_addr` aman karena menimpa.
+- Jangan isi `0.0.0.0/0` / `::/0` — sama dengan mempercayai semua orang.
+  `cfg.Validate()` menolaknya (fatal di produksi), begitu pula entri yang tidak
+  bisa di-parse dan `PROXY_HEADER` yang diisi tanpa `TRUSTED_PROXIES`.
+- Bila proxy-nya **Next.js `rewrites`** (Topologi B di `docs/DEPLOYMENT.md`),
+  Next.js tidak menyetel `X-Real-IP` dan meneruskan header kiriman klien
+  **apa adanya** — termasuk `X-Real-IP` palsu. Jangan percayai server Next.js
+  langsung kecuali ada nginx/Caddy di depannya yang menimpa `X-Real-IP`;
+  barulah isi `TRUSTED_PROXIES` dengan IP server Next.js.
+- Tanpa proxy sama sekali, biarkan `TRUSTED_PROXIES` kosong.

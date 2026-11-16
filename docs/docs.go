@@ -1086,6 +1086,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    },
+                    "429": {
+                        "description": "Terlalu banyak pesan (5/menit per IP)",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -1125,6 +1131,12 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Terlalu banyak pesan (5/menit per IP)",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -1634,9 +1646,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "coverImageUrl": {
+                    "description": "URL gambar sampul: http(s) absolut atau path yang diawali \"/\".",
                     "type": "string"
                 },
                 "demoUrl": {
+                    "description": "URL demo: hanya http:// atau https:// dengan host.",
                     "type": "string"
                 },
                 "features": {
@@ -1654,6 +1668,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "repoUrl": {
+                    "description": "URL repositori: hanya http:// atau https:// dengan host.",
                     "type": "string"
                 },
                 "results": {
@@ -1667,7 +1682,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "screenshots": {
-                    "description": "list URL gambar, sederhana dulu",
+                    "description": "Daftar URL gambar: tiap item http(s) absolut atau path yang diawali \"/\".",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -1815,9 +1830,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "coverImageUrl": {
+                    "description": "URL gambar sampul: http(s) absolut atau path yang diawali \"/\".",
                     "type": "string"
                 },
                 "demoUrl": {
+                    "description": "URL demo: hanya http:// atau https:// dengan host.",
                     "type": "string"
                 },
                 "features": {
@@ -1835,6 +1852,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "repoUrl": {
+                    "description": "URL repositori: hanya http:// atau https:// dengan host.",
                     "type": "string"
                 },
                 "results": {
@@ -1848,7 +1866,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "screenshots": {
-                    "description": "list URL gambar, sederhana dulu",
+                    "description": "Daftar URL gambar: tiap item http(s) absolut atau path yang diawali \"/\".",
                     "type": "array",
                     "items": {
                         "type": "string"

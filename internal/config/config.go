@@ -2,10 +2,18 @@ package config
 
 import (
 	"errors"
+	"net"
 	"strings"
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/helpers"
 )
+
+// DefaultProxyHeader adalah header IP klien yang dipakai bila TRUSTED_PROXIES
+// diisi tapi PROXY_HEADER tidak. Dipilih X-Real-IP (bukan X-Forwarded-For)
+// karena proxy umumnya MENIMPA X-Real-IP dengan alamat peer-nya, sedangkan
+// X-Forwarded-For sering DITAMBAH (append) — entri paling kiri, yang diambil
+// Fiber, tetap berasal dari klien dan bisa dipalsukan.
+const DefaultProxyHeader = "X-Real-IP"
 
 // defaultInsecureJWTSecret adalah nilai placeholder yang TIDAK boleh dipakai di produksi.
 const defaultInsecureJWTSecret = "super-secret-ganti-sendiri"
@@ -55,6 +63,15 @@ type Config struct {
 	UploadDir string
 	// UploadMaxBytes adalah batas ukuran satu berkas unggahan.
 	UploadMaxBytes int
+
+	// --- Reverse proxy (IP klien untuk rate limit & log) ---
+	// TrustedProxies adalah daftar IP/CIDR proxy yang header IP-nya dipercaya
+	// (env TRUSTED_PROXIES, dipisah koma). Kosong = header proxy DIABAIKAN dan
+	// IP klien diambil dari alamat koneksi (perilaku aman bila tanpa proxy).
+	TrustedProxies []string
+	// ProxyHeader adalah nilai mentah env PROXY_HEADER (boleh kosong). Pakai
+	// ResolvedProxyHeader() untuk nilai efektifnya.
+	ProxyHeader string
 }
 
 func Load() *Config {
@@ -97,7 +114,61 @@ func Load() *Config {
 		),
 		UploadDir:      helpers.GetEnv("UPLOAD_DIR", "./uploads"),
 		UploadMaxBytes: helpers.GetEnvInt("UPLOAD_MAX_BYTES", 5*1024*1024), // 5 MB
+
+		TrustedProxies: splitList(helpers.GetEnv("TRUSTED_PROXIES", "")),
+		ProxyHeader:    strings.TrimSpace(helpers.GetEnv("PROXY_HEADER", "")),
 	}
+}
+
+// splitList memecah daftar dipisah koma, membuang spasi & entri kosong.
+func splitList(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// BehindTrustedProxy true bila TRUSTED_PROXIES diisi, artinya header IP dari
+// proxy tersebut boleh dipakai sebagai IP klien.
+func (c *Config) BehindTrustedProxy() bool {
+	return len(c.TrustedProxies) > 0
+}
+
+// ResolvedProxyHeader mengembalikan header IP klien yang efektif: PROXY_HEADER
+// bila diisi, selain itu DefaultProxyHeader.
+func (c *Config) ResolvedProxyHeader() string {
+	if c.ProxyHeader != "" {
+		return c.ProxyHeader
+	}
+	return DefaultProxyHeader
+}
+
+// trustedProxyProblems memeriksa tiap entri TRUSTED_PROXIES. Entri yang tidak
+// bisa di-parse akan diabaikan Fiber tanpa suara, jadi harus terlihat di sini.
+func (c *Config) trustedProxyProblems() []string {
+	var problems []string
+	for _, entry := range c.TrustedProxies {
+		if strings.Contains(entry, "/") {
+			_, ipNet, err := net.ParseCIDR(entry)
+			if err != nil {
+				problems = append(problems, "TRUSTED_PROXIES berisi CIDR tidak valid: "+entry)
+				continue
+			}
+			// /0 = mempercayai SEMUA alamat: siapa pun bisa memalsukan header
+			// IP dan mengakali rate limit (termasuk login).
+			if ones, _ := ipNet.Mask.Size(); ones == 0 {
+				problems = append(problems, "TRUSTED_PROXIES berisi "+entry+" yang mempercayai semua alamat (header IP klien bisa dipalsukan siapa pun)")
+			}
+			continue
+		}
+		if net.ParseIP(entry) == nil {
+			problems = append(problems, "TRUSTED_PROXIES berisi IP tidak valid: "+entry)
+		}
+	}
+	return problems
 }
 
 // IsProduction mengembalikan true jika aplikasi berjalan di environment produksi.
@@ -176,6 +247,15 @@ func (c *Config) Validate() error {
 	if c.IsProduction() && strings.Contains(c.AppPublicURL, "localhost") {
 		problems = append(problems, "APP_PUBLIC_URL masih menunjuk localhost di produksi (URL ini tersimpan ke database bersama berkas unggahan)")
 	}
+
+	// PROXY_HEADER tanpa TRUSTED_PROXIES TIDAK berpengaruh: header diabaikan dan
+	// semua klien di balik proxy berbagi satu jatah rate limit (IP proxy).
+	// Operator yang mengisinya jelas mengira header itu dipakai — lebih baik
+	// gagal terang-terangan daripada login limiter diam-diam menjadi global.
+	if c.ProxyHeader != "" && !c.BehindTrustedProxy() {
+		problems = append(problems, "PROXY_HEADER diisi tanpa TRUSTED_PROXIES: header diabaikan dan semua klien di balik proxy berbagi satu jatah rate limit")
+	}
+	problems = append(problems, c.trustedProxyProblems()...)
 
 	if len(problems) == 0 {
 		return nil

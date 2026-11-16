@@ -29,6 +29,7 @@ func NewContactHandler(repo repository.ContactMessageRepository) *ContactHandler
 // @Param        payload body ContactCreateRequest true "Contact form"
 // @Success      201    {object} map[string]string
 // @Failure      422    {object} ErrorResponse
+// @Failure      429    {object} ErrorResponse "Terlalu banyak pesan (5/menit per IP)"
 // @Router       /contact [post]
 // @Router       /contact-messages [post]
 func (h *ContactHandler) Create(c *fiber.Ctx) error {

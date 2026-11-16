@@ -122,6 +122,15 @@ COOKIE_SECURE=true
 Pola yang sama berlaku bila reverse proxy-nya Nginx/Caddy/Traefik di depan
 keduanya.
 
+**IP klien untuk rate limit.** Di topologi ini backend melihat IP proxy, bukan
+IP pengunjung, sehingga rate limit (login, contact, reset) menjadi satu jatah
+bersama. Isi `TRUSTED_PROXIES` dengan IP/CIDR proxy dan pastikan proxy MENIMPA
+`X-Real-IP` (nginx: `proxy_set_header X-Real-IP $remote_addr;`). Next.js
+`rewrites` tidak menyetel `X-Real-IP` dan meneruskan header kiriman klien apa
+adanya, jadi server Next.js baru boleh dipercaya bila ada nginx/Caddy di
+depannya yang menimpa header itu. Detail & contoh: bagian "Deploy di balik reverse proxy" di
+`README.md`.
+
 ---
 
 ## Topologi C — domain induk benar-benar berbeda

@@ -163,3 +163,70 @@ func TestMailerConfigured(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadTrustedProxiesDanProxyHeader(t *testing.T) {
+	t.Setenv("TRUSTED_PROXIES", " 10.0.0.1, ,172.16.0.0/12 ,")
+	t.Setenv("PROXY_HEADER", "")
+
+	c := Load()
+	if got, want := strings.Join(c.TrustedProxies, "|"), "10.0.0.1|172.16.0.0/12"; got != want {
+		t.Errorf("TrustedProxies = %q, mau %q", got, want)
+	}
+	if !c.BehindTrustedProxy() {
+		t.Error("BehindTrustedProxy seharusnya true")
+	}
+	// PROXY_HEADER kosong → default X-Real-IP, bukan X-Forwarded-For.
+	if got := c.ResolvedProxyHeader(); got != "X-Real-IP" {
+		t.Errorf("ResolvedProxyHeader = %q, mau X-Real-IP", got)
+	}
+
+	t.Setenv("PROXY_HEADER", "CF-Connecting-IP")
+	if got := Load().ResolvedProxyHeader(); got != "CF-Connecting-IP" {
+		t.Errorf("ResolvedProxyHeader = %q, mau CF-Connecting-IP", got)
+	}
+}
+
+func TestLoadTanpaTrustedProxies(t *testing.T) {
+	t.Setenv("TRUSTED_PROXIES", "")
+	c := Load()
+	if c.BehindTrustedProxy() || len(c.TrustedProxies) != 0 {
+		t.Errorf("tanpa env, proxy tidak boleh dipercaya: %v", c.TrustedProxies)
+	}
+}
+
+func TestValidateProxyConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		proxies []string
+		header  string
+		wantErr string // kosong = harus lolos
+	}{
+		{name: "tanpa proxy", wantErr: ""},
+		{name: "proxy IP + default header", proxies: []string{"10.0.0.1"}, wantErr: ""},
+		{name: "proxy CIDR + header eksplisit", proxies: []string{"172.16.0.0/12", "::1"}, header: "X-Real-IP", wantErr: ""},
+		{name: "header tanpa proxy", header: "X-Real-IP", wantErr: "PROXY_HEADER diisi tanpa TRUSTED_PROXIES"},
+		{name: "CIDR rusak", proxies: []string{"10.0.0.0/99"}, wantErr: "CIDR tidak valid"},
+		{name: "IP rusak", proxies: []string{"nginx"}, wantErr: "IP tidak valid"},
+		{name: "percaya semua IPv4", proxies: []string{"0.0.0.0/0"}, wantErr: "mempercayai semua alamat"},
+		{name: "percaya semua IPv6", proxies: []string{"::/0"}, wantErr: "mempercayai semua alamat"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseCfg()
+			c.TrustedProxies = tc.proxies
+			c.ProxyHeader = tc.header
+
+			err := c.Validate()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("seharusnya lolos, dapat: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("galat mau memuat %q, dapat: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
