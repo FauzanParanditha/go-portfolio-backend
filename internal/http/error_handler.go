@@ -22,6 +22,8 @@ func errorCodeForStatus(status int) string {
 		return "METHOD_NOT_ALLOWED"
 	case fiber.StatusConflict:
 		return "CONFLICT"
+	case fiber.StatusUnsupportedMediaType:
+		return "UNSUPPORTED_MEDIA_TYPE"
 	case fiber.StatusUnprocessableEntity:
 		return "VALIDATION_ERROR"
 	case fiber.StatusTooManyRequests:

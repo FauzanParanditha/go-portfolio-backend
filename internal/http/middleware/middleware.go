@@ -48,6 +48,18 @@ func RegisterGlobal(app *fiber.App, cfg *config.Config) {
 	// Request ID
 	app.Use(requestid.New())
 
+	// Tolak request body terkompresi (cegah decompression bomb). Lihat
+	// RejectContentEncoding untuk alasannya.
+	//
+	// Posisi: tepat SETELAH requestid dan SEBELUM logger, CORS, maupun handler.
+	// Tidak ada middleware sebelum titik ini yang membaca body (recover, guard
+	// Content-Length, helmet, dan requestid hanya menyentuh header), jadi body
+	// terkompresi tidak pernah sempat didekompresi. Sengaja tidak diletakkan
+	// sebelum requestid supaya envelope 415 tetap membawa `requestId` (kontrak
+	// docs/API-CONTRACT.md) dan header keamanan helmet tetap terpasang. Urutan
+	// invarian recover → helmet → requestid → logger → CORS tidak berubah.
+	app.Use(RejectContentEncoding())
+
 	// Custom HTTP request logger dengan zerolog
 	app.Use(func(c *fiber.Ctx) error {
 		start := time.Now()

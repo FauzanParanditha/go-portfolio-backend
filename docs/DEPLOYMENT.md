@@ -256,6 +256,52 @@ indikasi stored XSS yang perlu diperiksa asal-usulnya, bukan sekadar dirapikan.
 
 ---
 
+## Tolak request body terkompresi di reverse proxy
+
+Fiber v2 mendekompresi body request (`Content-Encoding: gzip`/`br`/`deflate`,
+termasuk berantai seperti `gzip, gzip`) **tanpa batas**, sementara batas body
+1 MB hanya melihat ukuran yang masih terkompresi. ~200 KB gzip bisa mengembang
+jadi ~200 MB di memori (*decompression bomb*) lewat endpoint publik seperti
+`/auth/login` atau `/contact`.
+
+Backend sudah menolaknya sendiri: setiap request dengan `Content-Encoding`
+selain kosong/`identity` dibalas **415 `UNSUPPORTED_MEDIA_TYPE`** sebelum body
+dibaca (`middleware.RejectContentEncoding`). Klien normal — browser, `fetch`,
+unggahan multipart — tidak pernah mengirim header ini pada request.
+
+Tetap disarankan reverse proxy **juga** menolaknya sebagai lapis kedua, supaya
+request semacam itu tidak sampai ke proses Go sama sekali, dan supaya proxy
+tidak dikonfigurasi untuk mendekompresi body atas nama backend (mis. modul
+`gunzip` request milik proxy — jangan diaktifkan).
+
+**Nginx** (taruh di blok `location /api/` yang SAMA dengan `proxy_set_header X-Real-IP`
+dari bagian trusted proxy, jangan membuat blok kedua — nginx menolak `location` ganda):
+
+```nginx
+location /api/ {
+    if ($http_content_encoding !~* "^(identity)?$") {
+        return 415;
+    }
+    proxy_pass http://backend:8080;
+}
+```
+
+**Caddy:**
+
+```caddy
+@compressedBody {
+    header Content-Encoding *
+    not header Content-Encoding identity
+}
+respond @compressedBody 415
+```
+
+Ini hanya menyangkut header **request**; kompresi **respons**
+(`Accept-Encoding` → `Content-Encoding` pada respons) tidak terpengaruh dan
+boleh tetap diaktifkan di proxy.
+
+---
+
 ## Verifikasi cookie setelah deploy
 
 ```sh

@@ -198,6 +198,7 @@ Beberapa kontrol yang sudah diterapkan:
 - URL yang dirender sebagai link (`demoUrl`, `repoUrl`) hanya menerima `http`/`https` dengan host; URL gambar (`coverImageUrl`, `screenshots`) menerima `http`/`https` atau path `/...`. Skema seperti `javascript:`/`data:` ditolak `422` — termasuk lewat `make import`.
 - Token reset password acak 256-bit, disimpan sebagai **hash**, sekali pakai, dan kedaluwarsa; `forgot-password` membalas seragam agar tidak bisa dipakai mengenumerasi email terdaftar.
 - Security headers via `helmet`, batas body 1MB, query parameterized (anti SQL-injection).
+- Request dengan header `Content-Encoding` (gzip/br/deflate/dll., selain `identity`) ditolak **415** sebelum body dibaca — mencegah *decompression bomb*, karena Fiber mendekompresi body tanpa batas dan batas 1MB hanya melihat ukuran terkompresi.
 - Swagger UI hanya aktif di luar produksi.
 
 ### Checklist Produksi
@@ -210,6 +211,7 @@ Beberapa kontrol yang sudah diterapkan:
 6. Atribut cookie sesi disesuaikan dengan topologi deploy — lihat **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**.
 7. SMTP diisi bila fitur reset password dipakai; tanpa itu endpointnya membalas `503` di produksi.
 8. Bila backend di balik reverse proxy, isi `TRUSTED_PROXIES` (dan pastikan proxy menimpa `X-Real-IP`) — tanpa itu rate limit berlaku untuk semua pengunjung sekaligus. Lihat bagian berikut.
+9. Reverse proxy di depan backend sebaiknya **juga** menolak request ber-`Content-Encoding` (lapis pertahanan kedua) — contoh konfigurasi di [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#tolak-request-body-terkompresi-di-reverse-proxy) dan di contoh nginx di bawah.
 
 ### Deploy di balik reverse proxy
 
@@ -224,6 +226,10 @@ Perbaikannya dua sisi:
 
    ```nginx
    location /api/ {
+       # Lapis kedua anti decompression bomb (lihat checklist no. 9).
+       if ($http_content_encoding !~* "^(identity)?$") {
+           return 415;
+       }
        proxy_pass http://backend:8080;
        proxy_set_header Host $host;
        # WAJIB menimpa (bukan menambah): nilai kiriman klien dibuang.
