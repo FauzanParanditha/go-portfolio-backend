@@ -24,6 +24,9 @@ type AppDeps struct {
 	Denylist denylist.Denylist
 	Mailer   mailer.Mailer
 	Storage  storage.Storage
+	// Pinger dipakai endpoint status publik (/api/v1/readyz). Opsional: bila nil,
+	// diturunkan dari DB (lihat resolvePinger). Di-inject di test agar DB-free.
+	Pinger handlers.Pinger
 }
 
 func NewRouter(deps AppDeps) *fiber.App {
@@ -75,6 +78,7 @@ func NewRouter(deps AppDeps) *fiber.App {
 	}
 
 	registerHealthRoutes(app, deps)
+	registerPublicStatusRoutes(app, deps)
 	registerUploadRoutes(app, deps)
 
 	registerAuthRoutes(app, deps)
@@ -143,6 +147,59 @@ func registerHealthRoutes(app *fiber.App, deps AppDeps) {
 			"status": "ready",
 		})
 	})
+}
+
+// Batas request endpoint status publik: 60/menit per IP. Cukup longgar untuk
+// tampilan status yang melakukan polling tiap beberapa detik, tapi menahan
+// klien yang memukul endpoint ini terus-menerus.
+const publicStatusRateLimit = 60
+
+// Status publik di bawah /api/v1, dipakai tampilan "status live" di frontend.
+// Berbeda dari /healthz dan /readyz di root (monitoring/orkestrasi, sengaja
+// tidak diubah): ikut diteruskan reverse proxy yang hanya meneruskan /api/*,
+// memakai envelope standar, dibatasi rate limit, dan tidak merinci penyebab
+// gangguan ke publik.
+func registerPublicStatusRoutes(app *fiber.App, deps AppDeps) {
+	handler := handlers.NewHealthHandler(resolvePinger(deps))
+
+	// Status tidak boleh di-cache browser/proxy. Dipasang paling depan supaya
+	// header-nya ikut pada respons 429 dan 503.
+	noStore := middleware.NoStore()
+
+	// Satu instance limiter dipakai KEDUA route, sehingga jatahnya bersama.
+	// Limiter berada di depan handler: request yang ditolak tidak pernah
+	// sampai ke pemeriksaan database.
+	statusLimiter := middleware.NewRateLimiter(publicStatusRateLimit, 1*time.Minute, "terlalu banyak permintaan, coba lagi nanti")
+
+	api := app.Group("/api/v1")
+	api.Get("/healthz", noStore, statusLimiter, handler.Healthz)
+	api.Get("/readyz", noStore, statusLimiter, handler.Readyz)
+}
+
+// resolvePinger memilih Pinger untuk pemeriksaan readiness: yang di-inject bila
+// ada, selain itu *sql.DB di balik GORM. Mengembalikan nil bila keduanya tidak
+// tersedia (mis. router dirakit tanpa database di test) — handler lalu
+// menjawab 503 alih-alih panic.
+func resolvePinger(deps AppDeps) handlers.Pinger {
+	if deps.Pinger != nil {
+		return deps.Pinger
+	}
+	if deps.DB == nil {
+		return nil
+	}
+	sqlDB, err := deps.DB.DB()
+	if err != nil {
+		// Sebabnya di-log di sini; akibatnya (readiness selalu 503) di-log
+		// sekali oleh konstruktor handler saat menerima pinger nil.
+		log.Error().Err(err).Msg("readiness: gagal mengambil handle database")
+		return nil
+	}
+	// Jangan kembalikan sqlDB mentah saat nil: *sql.DB nil yang dibungkus
+	// antarmuka tidak lagi == nil dan akan lolos dari pemeriksaan di handler.
+	if sqlDB == nil {
+		return nil
+	}
+	return sqlDB
 }
 
 // Public project routes (yang sebelumnya sudah ada)

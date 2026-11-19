@@ -1169,6 +1169,32 @@ const docTemplate = `{
                 }
             }
         },
+        "/healthz": {
+            "get": {
+                "description": "Liveness untuk tampilan status di situs publik: proses API hidup dan menjawab. Tidak menyentuh database. Rate limit 60 request/menit per IP, satu jatah bersama dengan ` + "`" + `/readyz` + "`" + `. Respons membawa ` + "`" + `Cache-Control: no-store` + "`" + `.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Status hidup layanan",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.HealthzResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Terlalu banyak permintaan (60/menit per IP, jatah bersama dengan /readyz)",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/me": {
             "get": {
                 "security": [
@@ -1298,6 +1324,38 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/readyz": {
+            "get": {
+                "description": "Readiness untuk tampilan status di situs publik. Hasil pemeriksaan di-memo 5 detik di server, jadi status bisa tertinggal paling lama 5 detik. Bila layanan tidak siap, balasannya 503 dengan pesan generik tanpa rincian penyebab. Rate limit 60 request/menit per IP, satu jatah bersama dengan ` + "`" + `/healthz` + "`" + `. Respons membawa ` + "`" + `Cache-Control: no-store` + "`" + `.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Status kesiapan layanan",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ReadyzResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Terlalu banyak permintaan (60/menit per IP, jatah bersama dengan /healthz)",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Layanan sedang terganggu (kode SERVICE_UNAVAILABLE)",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -1576,6 +1634,26 @@ const docTemplate = `{
             "properties": {
                 "email": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.HealthzResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/handlers.HealthzStatus"
+                }
+            }
+        },
+        "handlers.HealthzStatus": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "ok"
+                    ],
+                    "example": "ok"
                 }
             }
         },
@@ -1918,6 +1996,26 @@ const docTemplate = `{
                     }
                 },
                 "meta": {}
+            }
+        },
+        "handlers.ReadyzResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/handlers.ReadyzStatus"
+                }
+            }
+        },
+        "handlers.ReadyzStatus": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "ready"
+                    ],
+                    "example": "ready"
+                }
             }
         },
         "handlers.ResetPasswordRequest": {

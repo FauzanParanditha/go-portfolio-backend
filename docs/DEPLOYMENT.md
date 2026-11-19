@@ -116,8 +116,15 @@ penuh karena cookie-nya first-party.
 >    diabaikan dan backend memakai alamat koneksi, yaitu IP server Next.js.
 >    Konsekuensinya diterima secara sadar: semua pengunjung **berbagi satu
 >    jatah** untuk setiap limiter per-IP (login 10/menit, forgot 5, reset 10,
->    contact 5). Satu pengirim spam bisa menghabiskan jatah contact atau login
->    untuk semua orang, termasuk admin.
+>    contact 5, status 60). Satu pengirim spam bisa menghabiskan jatah contact
+>    atau login untuk semua orang, termasuk admin.
+>
+>    Limiter status (`/api/v1/healthz` + `/api/v1/readyz`, 60/menit untuk
+>    kedua endpoint sekaligus) ikut menjadi jatah bersama. Terminal status di
+>    frontend memakai 12 permintaan/menit per pengunjung saat panelnya terbuka
+>    dan 2/menit saat tidak, jadi lima pengunjung dengan panel terbuka sudah
+>    menghabiskan jatah itu: terminal akan sering menampilkan "Checking
+>    paused" (respons `429`) walau layanan sehat.
 >
 > Dalam kedua kasus, port backend **tidak boleh** dipublikasikan ke internet:
 > bind ke `127.0.0.1` atau jaringan Docker internal saja (lihat README, bagian

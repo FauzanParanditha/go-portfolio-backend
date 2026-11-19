@@ -166,6 +166,19 @@ definitions:
     required:
     - email
     type: object
+  handlers.HealthzResponse:
+    properties:
+      data:
+        $ref: '#/definitions/handlers.HealthzStatus'
+    type: object
+  handlers.HealthzStatus:
+    properties:
+      status:
+        enum:
+        - ok
+        example: ok
+        type: string
+    type: object
   handlers.LoginRequest:
     properties:
       email:
@@ -405,6 +418,19 @@ definitions:
           $ref: '#/definitions/handlers.ProjectResponse'
         type: array
       meta: {}
+    type: object
+  handlers.ReadyzResponse:
+    properties:
+      data:
+        $ref: '#/definitions/handlers.ReadyzStatus'
+    type: object
+  handlers.ReadyzStatus:
+    properties:
+      status:
+        enum:
+        - ready
+        example: ready
+        type: string
     type: object
   handlers.ResetPasswordRequest:
     properties:
@@ -1245,6 +1271,26 @@ paths:
       summary: Get experiences
       tags:
       - experiences
+  /healthz:
+    get:
+      description: 'Liveness untuk tampilan status di situs publik: proses API hidup
+        dan menjawab. Tidak menyentuh database. Rate limit 60 request/menit per IP,
+        satu jatah bersama dengan `/readyz`. Respons membawa `Cache-Control: no-store`.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.HealthzResponse'
+        "429":
+          description: Terlalu banyak permintaan (60/menit per IP, jatah bersama dengan
+            /readyz)
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Status hidup layanan
+      tags:
+      - health
   /me:
     get:
       description: Return authenticated admin user info from JWT
@@ -1333,6 +1379,32 @@ paths:
       summary: Get project detail
       tags:
       - projects
+  /readyz:
+    get:
+      description: 'Readiness untuk tampilan status di situs publik. Hasil pemeriksaan
+        di-memo 5 detik di server, jadi status bisa tertinggal paling lama 5 detik.
+        Bila layanan tidak siap, balasannya 503 dengan pesan generik tanpa rincian
+        penyebab. Rate limit 60 request/menit per IP, satu jatah bersama dengan `/healthz`.
+        Respons membawa `Cache-Control: no-store`.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ReadyzResponse'
+        "429":
+          description: Terlalu banyak permintaan (60/menit per IP, jatah bersama dengan
+            /healthz)
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Layanan sedang terganggu (kode SERVICE_UNAVAILABLE)
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Status kesiapan layanan
+      tags:
+      - health
   /tags:
     get:
       description: Seluruh tag beserta tipenya, dipakai situs publik untuk menyusun
