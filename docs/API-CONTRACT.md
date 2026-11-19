@@ -71,7 +71,8 @@ Diturunkan dari HTTP status secara terpusat:
 | 422  | `VALIDATION_ERROR`  |
 | 429  | `TOO_MANY_REQUESTS` |
 | 4xx lain | `CLIENT_ERROR`  |
-| 5xx  | `SERVER_ERROR`      |
+| 503  | `SERVICE_UNAVAILABLE` |
+| 5xx lain | `SERVER_ERROR`  |
 
 #### Error validasi (422)
 
@@ -154,12 +155,26 @@ Endpoint list menerima query params:
 
 ### Health
 
+Dua pasang endpoint, untuk dua pemakai yang berbeda.
+
+**Status publik** — di bawah `/api/v1`, untuk dipanggil langsung dari browser (terminal status di frontend):
+
+| Method | Path       | Auth | Keterangan |
+| ------ | ---------- | ---- | ---------- |
+| GET    | `/healthz` | —    | Proses API hidup. `200 {"data":{"status":"ok"}}` |
+| GET    | `/readyz`  | —    | API siap melayani. `200 {"data":{"status":"ready"}}`, atau `503` dengan envelope error standar (`code: SERVICE_UNAVAILABLE`) |
+
+- **`503` sengaja generik:** pesannya tidak menyebut komponen mana yang bermasalah. Frontend cukup menampilkan "degraded"; jangan menulis "database down", karena backend tidak menyatakan itu.
+- **Rate-limited 60 req/menit per IP**, satu jatah untuk kedua path (`429` jika terlampaui, dengan `Retry-After`).
+- **`Cache-Control: no-store`** pada `200`, `503`, dan `429`. Tanpa auth dan tanpa cookie.
+- Hasil `/readyz` di-memo 5 detik di server, jadi waktu responsnya **bukan** latensi database.
+
+**Monitoring** — di root, **bukan** di bawah `/api/v1`; tanpa envelope dan tanpa rate limit. Jangan dibuka ke internet:
+
 | Method | Path       | Auth | Keterangan |
 | ------ | ---------- | ---- | ---------- |
 | GET    | `/healthz` | —    | Liveness, selalu `{"status":"ok"}` |
 | GET    | `/readyz`  | —    | Readiness, ping DB (`503` jika DB unreachable) |
-
-> Health endpoints berada di root, **bukan** di bawah `/api/v1`.
 
 ### Auth
 
