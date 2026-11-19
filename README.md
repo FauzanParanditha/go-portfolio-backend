@@ -144,8 +144,8 @@ Base path: `/api/v1`
 
 | Method | Endpoint            | Keterangan |
 | ------ | ------------------- | ---------- |
-| GET    | `/healthz`          | Liveness |
-| GET    | `/readyz`           | Readiness (ping DB) |
+| GET    | `/healthz`          | Status hidup untuk tampilan status di situs publik. Envelope `{"data":{"status":"ok"}}`, `Cache-Control: no-store`, rate-limited 60/menit (berbagi jatah dengan `/readyz`) |
+| GET    | `/readyz`           | Status kesiapan untuk situs publik. `{"data":{"status":"ready"}}`, atau `503` (`code: SERVICE_UNAVAILABLE`) dengan pesan generik tanpa rincian penyebab. Hasil di-memo 5 detik; `Cache-Control: no-store`; rate-limited 60/menit (berbagi jatah dengan `/healthz`) |
 | POST   | `/auth/login`       | Login admin (rate-limited 10/menit) |
 | GET    | `/projects`         | List project |
 | GET    | `/projects/:slug`   | Detail project |
@@ -153,6 +153,13 @@ Base path: `/api/v1`
 | POST   | `/auth/forgot-password` | Kirim tautan reset password (rate-limited 5/menit) |
 | POST   | `/auth/reset-password`  | Setel password baru dengan token dari email |
 | POST   | `/contact`          | Kirim pesan kontak (rate-limited 5/menit, berbagi jatah dengan alias `/contact-messages`) |
+
+Di luar base path (root, **bukan** `/api/v1`) — untuk monitoring/orkestrasi, tanpa envelope dan tanpa rate limit. Reverse proxy yang hanya meneruskan `/api/*` tidak meneruskan dua route ini; situs publik memakai `/api/v1/healthz` dan `/api/v1/readyz` di atas.
+
+| Method | Endpoint            | Keterangan |
+| ------ | ------------------- | ---------- |
+| GET    | `/healthz`          | Liveness, `{"status":"ok"}` |
+| GET    | `/readyz`           | Readiness (ping DB), `{"status":"ready"}` atau `503` |
 
 ### Terautentikasi (JWT)
 
@@ -194,7 +201,7 @@ Beberapa kontrol yang sudah diterapkan:
 - Route `/admin/*` wajib JWT **dan** role `admin` (`AuthJWT` + `RequireRole`).
 - Password di-hash dengan **bcrypt**; field password tidak pernah dikembalikan ke JSON.
 - Validasi konfigurasi saat startup — di `production`, `JWT_SECRET` lemah/default atau CORS `*`+credentials akan **menghentikan** aplikasi.
-- Rate limiting per IP pada login (10/menit, anti brute-force), forgot password (5/menit), reset password (10/menit), dan form kontak (5/menit, anti spam). Respons `429` memakai envelope error standar (`code: TOO_MANY_REQUESTS`).
+- Rate limiting per IP pada login (10/menit, anti brute-force), forgot password (5/menit), reset password (10/menit), form kontak (5/menit, anti spam), dan endpoint status publik `/api/v1/healthz` + `/api/v1/readyz` (60/menit, satu jatah bersama). Respons `429` memakai envelope error standar (`code: TOO_MANY_REQUESTS`).
 - URL yang dirender sebagai link (`demoUrl`, `repoUrl`) hanya menerima `http`/`https` dengan host; URL gambar (`coverImageUrl`, `screenshots`) menerima `http`/`https` atau path `/...`. Skema seperti `javascript:`/`data:` ditolak `422` — termasuk lewat `make import`.
 - Token reset password acak 256-bit, disimpan sebagai **hash**, sekali pakai, dan kedaluwarsa; `forgot-password` membalas seragam agar tidak bisa dipakai mengenumerasi email terdaftar.
 - Security headers via `helmet`, batas body 1MB, query parameterized (anti SQL-injection).
