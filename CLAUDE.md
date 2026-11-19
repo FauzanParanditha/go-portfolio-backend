@@ -66,8 +66,10 @@ it that way, never string-concat into queries).
 
 ### Routing & auth (internal/http/router.go)
 
-- Public routes: `/healthz`, `/readyz`, `/api/v1/projects`, `/api/v1/experiences`, `POST /api/v1/contact`,
-  `POST /api/v1/auth/login`.
+- Public routes: `/healthz`, `/readyz` (root, for monitoring — no envelope, no rate limit),
+  `/api/v1/healthz`, `/api/v1/readyz` (public status for the frontend: `{data}` envelope, one shared
+  60/min limiter, `Cache-Control: no-store`, generic 503 that never names the failing component),
+  `/api/v1/projects`, `/api/v1/experiences`, `POST /api/v1/contact`, `POST /api/v1/auth/login`.
 - `/api/v1/me` requires only `AuthJWT` (any authenticated user reads their own info).
 - **Every `/api/v1/admin/*` group MUST chain `AuthJWT` then `RequireRole("admin")`.** Each
   `registerAdmin*Routes` function repeats this pair locally (groups don't inherit). When adding a new admin
@@ -88,8 +90,8 @@ is **fatal**; otherwise it logs a warning. `cfg.IsProduction()` also gates Swagg
 
 - Errors: return `fiber.NewError(status, msg)` from handlers/middleware. The central handler
   (`internal/http/error_handler.go`, set as Fiber `ErrorHandler`) renders the JSON envelope and derives a
-  stable `code` from the status via `errorCodeForStatus` (e.g. 401→`UNAUTHORIZED`, 403→`FORBIDDEN`). Don't
-  build error JSON by hand.
+  stable `code` from the status via `errorCodeForStatus` (e.g. 401→`UNAUTHORIZED`, 403→`FORBIDDEN`,
+  503→`SERVICE_UNAVAILABLE`, other 5xx→`SERVER_ERROR`). Don't build error JSON by hand.
 - Validation failures return `422` with a `details` map built by `validation.ToFieldErrors`.
 - Success envelope: `{"data": ...}` via `internal/http/response` helpers (`OK`, `Created`), or `c.JSON` for
   custom shapes. Responses are wrapped (`data`/`error` + `requestId`), not bare models.
@@ -105,6 +107,9 @@ has `*_dto.go` files defining request structs with `validate:` tags; map DTO→m
 - `/admin/*` = `AuthJWT` + `RequireRole("admin")`. New admin routes must include both.
 - `JWT_SECRET` must be strong (≥32 chars, non-default); enforced by `cfg.Validate()`.
 - Login (`POST /auth/login`) is rate-limited (10/min) in `registerAuthRoutes`.
+- `/api/v1/healthz` + `/api/v1/readyz` share one 60/min limiter (`registerPublicStatusRoutes`) that runs
+  before the DB ping; the ping has a 2s timeout and its result is memoized for 5s, so anonymous traffic
+  cannot turn these routes into a DB load generator. Their 503 body must stay generic.
 - Global middleware order in `middleware/RegisterGlobal`: recover → body-size guard (413, via
   `Content-Length`) → helmet (security headers) → requestid → `RejectContentEncoding` → logger → CORS.
   CORS origins come from env; never pair `*` with credentials.
