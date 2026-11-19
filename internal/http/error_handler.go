@@ -28,6 +28,8 @@ func errorCodeForStatus(status int) string {
 		return "VALIDATION_ERROR"
 	case fiber.StatusTooManyRequests:
 		return "TOO_MANY_REQUESTS"
+	case fiber.StatusServiceUnavailable:
+		return "SERVICE_UNAVAILABLE"
 	}
 
 	switch {
