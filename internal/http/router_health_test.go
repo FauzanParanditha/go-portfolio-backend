@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -268,6 +269,42 @@ func TestStatusRateLimitPerKlien(t *testing.T) {
 	}
 	if resp, body := get(t, app, "/api/v1/healthz", "X-Real-IP", "203.0.113.20"); resp.StatusCode != http.StatusOK {
 		t.Fatalf("klien B: status = %d, mau 200 (jatah terpisah); body=%s", resp.StatusCode, body)
+	}
+}
+
+// Limiter status harus memakai kunci bersama middleware.NewRateLimiter: IPv6
+// dikelompokkan per /64. Dua alamat berbeda dalam /64 yang sama berbagi jatah
+// (kalau tidak, satu pelanggan IPv6 bisa memutar ~2^64 alamat dan tidak pernah
+// kena limit); /64 lain dan klien IPv4 punya jatah sendiri. Test IPv4 di atas
+// saja tidak menangkap limiter yang dipasang dengan kunci bawaan Fiber.
+func TestStatusRateLimitMengunciIPv6PerSlash64(t *testing.T) {
+	for _, path := range []string{"/api/v1/healthz", "/api/v1/readyz"} {
+		t.Run(path, func(t *testing.T) {
+			cfg := newTestConfig(t)
+			cfg.TrustedProxies = []string{"0.0.0.0"}
+			app := newStatusRouter(t, cfg, &pingerStub{})
+
+			// Habiskan jatah dengan alamat yang BERBEDA-BEDA di /64 yang sama.
+			for i := 1; i <= statusLimit; i++ {
+				ip := fmt.Sprintf("2001:db8:1:2::%x", i)
+				if resp, body := get(t, app, path, "X-Real-IP", ip); resp.StatusCode != http.StatusOK {
+					t.Fatalf("request ke-%d (%s): status = %d, mau 200; body=%s", i, ip, resp.StatusCode, body)
+				}
+			}
+
+			resp, body := get(t, app, path, "X-Real-IP", "2001:db8:1:2:ffff:ffff:ffff:ffff")
+			if resp.StatusCode != http.StatusTooManyRequests {
+				t.Fatalf("alamat lain di /64 yang sama: status = %d, mau 429 (jatah bersama); body=%s", resp.StatusCode, body)
+			}
+			assertErrorEnvelope(t, body, "TOO_MANY_REQUESTS")
+
+			if resp, body := get(t, app, path, "X-Real-IP", "2001:db8:1:3::1"); resp.StatusCode != http.StatusOK {
+				t.Fatalf("/64 berbeda: status = %d, mau 200 (jatah terpisah); body=%s", resp.StatusCode, body)
+			}
+			if resp, body := get(t, app, path, "X-Real-IP", "203.0.113.30"); resp.StatusCode != http.StatusOK {
+				t.Fatalf("klien IPv4: status = %d, mau 200; body=%s", resp.StatusCode, body)
+			}
+		})
 	}
 }
 

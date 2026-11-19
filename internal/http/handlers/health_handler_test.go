@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/FauzanParanditha/portfolio-backend/internal/http/handlers"
 	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 // Test di berkas ini DB-free: Pinger diganti tiruan, dan waktu (jam + batas
@@ -136,6 +139,50 @@ func TestReadyzMemoSatuPingPerJendela(t *testing.T) {
 	}
 	if n := pinger.calls.Load(); n != 2 {
 		t.Fatalf("setelah jendela lewat: Pinger dipanggil %d kali, mau 2", n)
+	}
+}
+
+// Jam yang MUNDUR tidak boleh membekukan memo. time.Now() punya pembacaan
+// monotonic, tetapi sumber waktu suntikan (HealthOptions.Now) belum tentu:
+// tanpa penjaga, selisih negatif selalu "lebih kecil dari TTL" dan status lama
+// terus disajikan sampai jam menyusul lagi (di sini: satu jam).
+func TestReadyzJamMundurTidakMembekukanMemo(t *testing.T) {
+	const ttl = 5 * time.Second
+	jam := newJamTiruan()
+	var gagal atomic.Bool
+	pinger := &pingerTiruan{fn: func(context.Context) error {
+		if gagal.Load() {
+			return errors.New("koneksi terputus")
+		}
+		return nil
+	}}
+	app := newHealthApp(pinger, handlers.HealthOptions{MemoTTL: ttl, Now: jam.Now})
+
+	if status, body := mustGet(t, app, "/api/v1/readyz"); status != http.StatusOK {
+		t.Fatalf("awal: status = %d, mau 200; body=%s", status, body)
+	}
+
+	// Database jatuh, lalu jam mundur satu jam.
+	gagal.Store(true)
+	jam.Maju(-1 * time.Hour)
+
+	status, body := mustGet(t, app, "/api/v1/readyz")
+	if n := pinger.calls.Load(); n != 2 {
+		t.Fatalf("setelah jam mundur: Pinger dipanggil %d kali, mau 2 (ping ulang)", n)
+	}
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("setelah jam mundur: status = %d, mau 503 (bukan memo lama); body=%s", status, body)
+	}
+
+	// Memo yang baru dicap dengan jam yang sudah mundur tetap berlaku normal.
+	mustGet(t, app, "/api/v1/readyz")
+	if n := pinger.calls.Load(); n != 2 {
+		t.Fatalf("dalam jendela baru: Pinger dipanggil %d kali, mau 2", n)
+	}
+	jam.Maju(ttl)
+	mustGet(t, app, "/api/v1/readyz")
+	if n := pinger.calls.Load(); n != 3 {
+		t.Fatalf("setelah jendela baru lewat: Pinger dipanggil %d kali, mau 3", n)
 	}
 }
 
@@ -307,7 +354,54 @@ func TestReadyzPingerLambat503(t *testing.T) {
 		if n := pinger.calls.Load(); n != 2 {
 			t.Fatalf("setelah pulih: Pinger dipanggil %d kali, mau 2", n)
 		}
+
+		// Pulihnya harus BERTAHAN. Penanda ping tersangkut wajib dibersihkan
+		// begitu ping lama kembali; kalau tidak, pemeriksaan berikutnya masih
+		// mengira ada ping yang berjalan dan readiness jadi 503 selamanya
+		// setelah satu kali timeout. Dua jendela diuji, bukan satu.
+		for putaran := 1; putaran <= 2; putaran++ {
+			jam.Maju(ttl)
+			if status, body := mustGet(t, app, "/api/v1/readyz"); status != http.StatusOK {
+				t.Fatalf("jendela ke-%d setelah pulih: status = %d, mau 200; body=%s", putaran, status, body)
+			}
+			if n, mau := pinger.calls.Load(), int32(2+putaran); n != mau {
+				t.Fatalf("jendela ke-%d setelah pulih: Pinger dipanggil %d kali, mau %d", putaran, n, mau)
+			}
+		}
 	})
+}
+
+// Tanpa pinger, setiap request readiness dijawab 503 tanpa pernah sampai ke
+// ping, jadi penyebabnya harus tercatat SEKALI saat handler dirakit — dan
+// tidak sekali per request (endpoint publik: log per request = banjir log).
+func TestReadyzTanpaPingerDilogSekaliSaatPerakitan(t *testing.T) {
+	const pesan = "pinger database tidak tersedia"
+
+	var buf bytes.Buffer
+	lama := log.Logger
+	log.Logger = zerolog.New(&buf)
+	t.Cleanup(func() { log.Logger = lama })
+
+	app := newHealthApp(nil, handlers.HealthOptions{})
+	if n := strings.Count(buf.String(), pesan); n != 1 {
+		t.Fatalf("saat perakitan: pesan %q muncul %d kali di log, mau 1.\nlog:\n%s", pesan, n, buf.String())
+	}
+
+	for i := 1; i <= 5; i++ {
+		if status, body := mustGet(t, app, "/api/v1/readyz"); status != http.StatusServiceUnavailable {
+			t.Fatalf("request ke-%d: status = %d, mau 503; body=%s", i, status, body)
+		}
+	}
+	if n := strings.Count(buf.String(), pesan); n != 1 {
+		t.Errorf("setelah 5 request: pesan %q muncul %d kali di log, mau tetap 1.\nlog:\n%s", pesan, n, buf.String())
+	}
+
+	// Dengan pinger yang ada, tidak ada peringatan sama sekali.
+	buf.Reset()
+	newHealthApp(&pingerTiruan{}, handlers.HealthOptions{})
+	if strings.Contains(buf.String(), pesan) {
+		t.Errorf("pinger tersedia tetapi peringatan tetap di-log:\n%s", buf.String())
+	}
 }
 
 // Tanpa Pinger (router dirakit tanpa database) atau dengan *sql.DB nil yang

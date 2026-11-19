@@ -189,7 +189,9 @@ func resolvePinger(deps AppDeps) handlers.Pinger {
 	}
 	sqlDB, err := deps.DB.DB()
 	if err != nil {
-		log.Error().Err(err).Msg("readiness: gagal mengambil handle database, /api/v1/readyz akan selalu 503")
+		// Sebabnya di-log di sini; akibatnya (readiness selalu 503) di-log
+		// sekali oleh konstruktor handler saat menerima pinger nil.
+		log.Error().Err(err).Msg("readiness: gagal mengambil handle database")
 		return nil
 	}
 	// Jangan kembalikan sqlDB mentah saat nil: *sql.DB nil yang dibungkus

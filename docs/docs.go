@@ -1183,7 +1183,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.HealthResponse"
+                            "$ref": "#/definitions/handlers.HealthzResponse"
                         }
                     },
                     "429": {
@@ -1345,7 +1345,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.HealthResponse"
+                            "$ref": "#/definitions/handlers.ReadyzResponse"
                         }
                     },
                     "429": {
@@ -1637,22 +1637,21 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.HealthResponse": {
+        "handlers.HealthzResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/handlers.HealthStatus"
+                    "$ref": "#/definitions/handlers.HealthzStatus"
                 }
             }
         },
-        "handlers.HealthStatus": {
+        "handlers.HealthzStatus": {
             "type": "object",
             "properties": {
                 "status": {
                     "type": "string",
                     "enum": [
-                        "ok",
-                        "ready"
+                        "ok"
                     ],
                     "example": "ok"
                 }
@@ -1997,6 +1996,26 @@ const docTemplate = `{
                     }
                 },
                 "meta": {}
+            }
+        },
+        "handlers.ReadyzResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/handlers.ReadyzStatus"
+                }
+            }
+        },
+        "handlers.ReadyzStatus": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "ready"
+                    ],
+                    "example": "ready"
+                }
             }
         },
         "handlers.ResetPasswordRequest": {

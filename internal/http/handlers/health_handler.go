@@ -86,6 +86,12 @@ func NewHealthHandlerWithOptions(pinger Pinger, opts HealthOptions) *HealthHandl
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	if pinger == nil {
+		// Di-log SEKALI saat perakitan, bukan per request: tanpa pinger setiap
+		// request readiness dijawab 503 tanpa pernah sampai ke ping (dan ke
+		// log-nya), jadi tanpa baris ini penyebabnya tidak tercatat di mana pun.
+		log.Warn().Msg("readiness: pinger database tidak tersedia, /api/v1/readyz akan selalu 503")
+	}
 	return &HealthHandler{
 		pinger:      pinger,
 		pingTimeout: opts.PingTimeout,
@@ -100,11 +106,11 @@ func NewHealthHandlerWithOptions(pinger Pinger, opts HealthOptions) *HealthHandl
 // @Description  Liveness untuk tampilan status di situs publik: proses API hidup dan menjawab. Tidak menyentuh database. Rate limit 60 request/menit per IP, satu jatah bersama dengan `/readyz`. Respons membawa `Cache-Control: no-store`.
 // @Tags         health
 // @Produce      json
-// @Success      200  {object} HealthResponse
+// @Success      200  {object} HealthzResponse
 // @Failure      429  {object} ErrorResponse "Terlalu banyak permintaan (60/menit per IP, jatah bersama dengan /readyz)"
 // @Router       /healthz [get]
 func (h *HealthHandler) Healthz(c *fiber.Ctx) error {
-	return response.OK(c, HealthStatus{Status: "ok"})
+	return response.OK(c, HealthzStatus{Status: "ok"})
 }
 
 // GET /api/v1/readyz
@@ -113,16 +119,19 @@ func (h *HealthHandler) Healthz(c *fiber.Ctx) error {
 // @Description  Readiness untuk tampilan status di situs publik. Hasil pemeriksaan di-memo 5 detik di server, jadi status bisa tertinggal paling lama 5 detik. Bila layanan tidak siap, balasannya 503 dengan pesan generik tanpa rincian penyebab. Rate limit 60 request/menit per IP, satu jatah bersama dengan `/healthz`. Respons membawa `Cache-Control: no-store`.
 // @Tags         health
 // @Produce      json
-// @Success      200  {object} HealthResponse
+// @Success      200  {object} ReadyzResponse
 // @Failure      429  {object} ErrorResponse "Terlalu banyak permintaan (60/menit per IP, jatah bersama dengan /healthz)"
 // @Failure      503  {object} ErrorResponse "Layanan sedang terganggu (kode SERVICE_UNAVAILABLE)"
 // @Router       /readyz [get]
 func (h *HealthHandler) Readyz(c *fiber.Ctx) error {
 	if err := h.checkReady(); err != nil {
-		// Penyebab asli sudah di-log oleh checkReady; ke publik hanya pesan generik.
+		// Ke publik hanya pesan generik. Penyebab aslinya ada di log server:
+		// kegagalan ping di-log checkReady sekali per ping, sedangkan ketiadaan
+		// pinger di-log sekali saat handler dirakit (bukan di sini, supaya
+		// tidak ada log per request).
 		return fiber.NewError(fiber.StatusServiceUnavailable, readyUnavailableMessage)
 	}
-	return response.OK(c, HealthStatus{Status: "ready"})
+	return response.OK(c, ReadyzStatus{Status: "ready"})
 }
 
 // checkReady mengembalikan hasil readiness dari memo bila masih segar, atau
@@ -136,7 +145,11 @@ func (h *HealthHandler) checkReady() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if h.checked && h.now().Sub(h.checkedAt) < h.memoTTL {
+	// d >= 0: bila jam mundur (sumber waktu tanpa pembacaan monotonic, mis. jam
+	// suntikan atau waktu hasil serialisasi), selisihnya negatif dan tanpa
+	// syarat ini memo dianggap segar sampai jam menyusul lagi — status bisa
+	// membeku berjam-jam. Jam mundur diperlakukan sebagai memo kedaluwarsa.
+	if d := h.now().Sub(h.checkedAt); h.checked && d >= 0 && d < h.memoTTL {
 		return h.lastErr
 	}
 
