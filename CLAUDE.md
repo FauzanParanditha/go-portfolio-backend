@@ -17,15 +17,20 @@ make seed           # go run ./cmd/seed — idempotent: creates admin user, opti
 make build          # build binary to bin/portfolio-backend
 make vet            # go vet ./...
 make fmt            # go fmt ./...
+make test           # go test -race ./...
+make cek            # go vet + gofmt -l (read-only: fails on unformatted files)
+make periksa        # release gate: bash tools/periksa.sh (CI runs the same script)
 make swagger        # regenerate docs/ from handler annotations (swag init -g cmd/api/main.go)
 ```
 
-Tests use the standard toolchain (no `make test` target despite `.PHONY` listing it):
+Single test by name:
 
 ```sh
-go test ./...                                              # all tests
-go test ./internal/http/middleware/ -run TestAdminRoute -v # single test by name
+go test ./internal/http/middleware/ -run TestAdminRoute -v
 ```
+
+`make periksa` needs `govulncheck` on PATH (`go install golang.org/x/vuln/cmd/govulncheck@latest`); it
+fails rather than skipping the audit when the tool is missing.
 
 Tests are sparse; the existing ones (`internal/http/middleware/require_role_test.go`) exercise the real
 middleware chain with `app.Test(...)` and signed JWTs — **no database required**. Prefer this pattern for
@@ -69,12 +74,16 @@ it that way, never string-concat into queries).
 - Public routes: `/healthz`, `/readyz` (root, for monitoring — no envelope, no rate limit),
   `/api/v1/healthz`, `/api/v1/readyz` (public status for the frontend: `{data}` envelope, one shared
   60/min limiter, `Cache-Control: no-store`, generic 503 that never names the failing component),
-  `/api/v1/projects`, `/api/v1/experiences`, `POST /api/v1/contact`, `POST /api/v1/auth/login`.
+  `/api/v1/projects`, `/api/v1/experiences`, `POST /api/v1/contact`, `POST /api/v1/auth/login`, and a few
+  more — the authoritative, test-enforced list is `routePublik` in `internal/http/router_penjaga_test.go`.
 - `/api/v1/me` requires only `AuthJWT` (any authenticated user reads their own info).
 - **Every `/api/v1/admin/*` group MUST chain `AuthJWT` then `RequireRole("admin")`.** Each
-  `registerAdmin*Routes` function repeats this pair locally (groups don't inherit). When adding a new admin
-  resource, copy that exact pattern — `AuthJWT` alone is not enough (it only proves the token is valid, not
-  that the role is admin).
+  `registerAdmin*Routes` function repeats this pair locally. When adding a new admin resource, copy that
+  exact pattern — `AuthJWT` alone is not enough (it only proves the token is valid, not that the role is
+  admin). Fiber detail: `group.Use(...)` applies to the group's path *prefix* in registration order, so the
+  pair in the first-registered admin group already covers later ones, while a route registered *before* any
+  pair is unguarded. Repeating the pair keeps each function safe regardless of order — don't rely on another
+  group's `Use`.
 
 `AuthJWT` (`middleware/auth_jwt.go`) validates the HS256 signature, enforces the signing method, and stores
 `user_id` + `user_role` in `c.Locals`. `RequireRole` (`middleware/require_role.go`) reads `user_role` from
@@ -105,6 +114,12 @@ has `*_dto.go` files defining request structs with `validate:` tags; map DTO→m
 ## Security invariants (recently hardened — do not regress)
 
 - `/admin/*` = `AuthJWT` + `RequireRole("admin")`. New admin routes must include both.
+  `TestSemuaRouteBerpenjaga` (`internal/http/router_penjaga_test.go`) calls every handler route of the real
+  router: no credentials → 401, `/api/v1/admin/*` with a non-admin token → 403. A route that is meant to be
+  public must be added to `routePublik` in that file, with its reason — that edit is the review signal.
+  Its limits: handlers mounted with `Use`/`Static` cannot be called, so only their *paths* are pinned
+  (`jalurUse`); and the role check covers the `/api/v1/admin` prefix only — an admin-only endpoint MUST live
+  under that prefix, and route paths must use plain `:param` / `*` segments (constraints fail the test).
 - `JWT_SECRET` must be strong (≥32 chars, non-default); enforced by `cfg.Validate()`.
 - Login (`POST /auth/login`) is rate-limited (10/min) in `registerAuthRoutes`.
 - `/api/v1/healthz` + `/api/v1/readyz` share one 60/min limiter (`registerPublicStatusRoutes`) that runs
@@ -116,7 +131,9 @@ has `*_dto.go` files defining request structs with `validate:` tags; map DTO→m
 - Requests with any `Content-Encoding` other than empty/`identity` are rejected with 415
   (`RejectContentEncoding`) before anything reads the body — Fiber/fasthttp would otherwise decompress
   without limit (decompression bomb). Nothing before it may call `c.Body()`/`BodyParser`/`FormFile`.
-- Fiber `BodyLimit` is 1MB (set in `NewRouter`).
+- Request bodies are capped at 1MB by the body-size guard in `middleware.RegisterGlobal`; only the upload
+  route is allowed more. Fiber's own `BodyLimit` (set in `NewRouter`) is `UPLOAD_MAX_BYTES` + 1MB, because
+  it applies to the whole app.
 - `.env` is gitignored and must stay untracked; `.env.example` documents the keys.
 
 ## API docs
@@ -133,7 +150,7 @@ sesi utama.
 Ringkasan stack untuk konteks delegasi:
 - **Backend (repo ini):** Go 1.26 + Fiber v2 (fasthttp) + GORM (PostgreSQL) + Atlas migrations, auth JWT HS256.
 - **Frontend (repo terpisah `../portfolio-frontend`):** Next.js 16 App Router + React 19 + TypeScript + Tailwind, pnpm.
-- **Testing:** toolchain Go (`go test ./...`); utamakan test DB-free (`app.Test` + JWT). **Lint/format:** `make vet`, `make fmt`.
+- **Testing:** `make test` (`go test -race ./...`); utamakan test DB-free (`app.Test` + JWT). **Lint/format:** `make cek`, `make fmt`. **Gerbang rilis:** `make periksa`.
 - **Konvensi:** komentar & pesan log/error Bahasa Indonesia; commit konvensional (`feat`, `fix(security)`, dst).
 
 Panduan delegasi:
@@ -153,8 +170,9 @@ Panduan delegasi:
 6. Sesi utama merangkum, pastikan Definition of Done terpenuhi, lalu siapkan untuk merge.
 
 ### Definition of Done (global)
-- [ ] Lulus lint & format (`make vet`, `make fmt`).
-- [ ] Test relevan ada dan hijau (`go test ./...`).
+- [ ] Lulus lint & format (`make cek`; perbaiki format dengan `make fmt`).
+- [ ] Test relevan ada dan hijau (`make test`).
+- [ ] Gerbang rilis hijau (`make periksa`).
 - [ ] Tidak ada rahasia ter-hardcode; `.env` tetap untracked.
 - [ ] Sudah di-review (code-reviewer) dan, bila sensitif, di-audit (security-auditor).
 - [ ] Dokumentasi/README/Swagger diperbarui bila perlu.
