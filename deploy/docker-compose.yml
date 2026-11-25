@@ -1,0 +1,151 @@
+# Stack PRODUKSI backend. Jangan dijalankan langsung dengan `docker compose up`:
+# pakai ./install.sh, ./update.sh, ./status.sh, ./backup.sh — mereka memilih
+# versi image yang benar dan memeriksa prasyaratnya. Lihat docs/PEMELIHARAAN.md.
+#
+# Nilai ${...} dibaca dari deploy/.env (dibuat install.sh dari env.example).
+name: portfolio-backend
+
+# Pengerasan bawaan tiap layanan; penyimpangan terlihat di layanannya.
+x-keras: &keras
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  read_only: true
+  pids_limit: 256
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  api:
+    <<: *keras
+    image: portfolio-backend/api:${VERSI:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        VERSI: ${VERSI:-dev}
+    # Daftar EKSPLISIT, bukan `env_file`: deploy/.env juga memuat sandi database,
+    # token alarm, dan kunci operasional lain yang tidak perlu berada di dalam
+    # proses API. Nama tanpa nilai = diteruskan dari deploy/.env bila ada di
+    # sana, dan TIDAK di-set bila tidak ada (aplikasi lalu memakai bawaannya).
+    # Kunci env baru yang dibaca aplikasi harus ditambahkan di sini;
+    # internal/config/deploy_env_test.go menggagalkan test bila terlewat.
+    environment:
+      # Ditetapkan di sini supaya tidak bisa melenceng dari isi image.
+      - APP_ENV=production
+      - APP_PORT=8080
+      - UPLOAD_DIR=/data/uploads
+      - DB_DSN
+      - APP_PUBLIC_URL
+      - APP_FRONTEND_URL
+      - JWT_SECRET
+      - JWT_EXPIRES_IN
+      - CORS_ALLOWED_ORIGINS
+      - CORS_ALLOWED_METHODS
+      - CORS_ALLOWED_HEADERS
+      - CORS_ALLOW_CREDENTIALS
+      - COOKIE_DOMAIN
+      - COOKIE_SAMESITE
+      - COOKIE_SECURE
+      - SMTP_HOST
+      - SMTP_PORT
+      - SMTP_USERNAME
+      - SMTP_PASSWORD
+      - SMTP_FROM
+      - SMTP_FROM_NAME
+      - PASSWORD_RESET_TTL
+      - UPLOAD_MAX_BYTES
+      - TRUSTED_PROXIES
+      - PROXY_HEADER
+    tmpfs: ["/tmp:size=64m"]
+    mem_limit: ${API_MEM_LIMIT:-256m}
+    # Satu-satunya port yang dipublikasikan, selalu dengan alamat eksplisit:
+    # port yang dipublikasikan Docker MELEWATI UFW/CSF. Bawaan 127.0.0.1 =
+    # hanya dari server ini (reverse proxy di host yang sama).
+    ports:
+      - "${ALAMAT_IKAT:-127.0.0.1}:${PORT_API:-8080}:8080"
+    volumes:
+      - unggahan:/data/uploads
+    networks: [depan, dalam]
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+    stop_grace_period: 20s
+
+  # PostgreSQL di server yang sama. Hanya menyala bila COMPOSE_PROFILES memuat
+  # "db"; kosongkan profil itu bila DB_DSN menunjuk database di tempat lain.
+  db:
+    <<: *keras
+    profiles: [db]
+    image: postgres:17.12-alpine3.24
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-portfolio}
+      POSTGRES_DB: ${POSTGRES_DB:-portfolio}
+      # Tanpa `:?`: compose menginterpolasi seluruh berkas juga saat profil db
+      # mati (database di luar stack), dan di sana sandi ini memang kosong.
+      # install.sh mewajibkannya bila profil db aktif; image postgres sendiri
+      # menolak menyiapkan database tanpa sandi.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    # Entrypoint image postgres berjalan sebagai root untuk menyiapkan folder
+    # data lalu turun ke pengguna postgres; hanya itu yang dikembalikan.
+    cap_add: [CHOWN, SETUID, SETGID, FOWNER, DAC_OVERRIDE]
+    tmpfs:
+      - /tmp:size=64m
+      - /run/postgresql:size=1m
+    shm_size: 128m
+    mem_limit: ${DB_MEM_LIMIT:-512m}
+    volumes:
+      - data_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    # Jaringan internal saja: tidak dipublikasikan, tidak punya rute ke luar.
+    networks: [dalam]
+    stop_grace_period: 60s
+
+  # Migrasi skema (Atlas), sekali jalan: `dc --profile alat run --rm migrate`.
+  # Dipanggil install.sh dan update.sh SEBELUM versi baru API dinyalakan.
+  migrate:
+    <<: *keras
+    profiles: [alat]
+    restart: "no"
+    image: arigaio/atlas:1.1.6-community-distroless
+    user: "65532:65532"
+    environment:
+      DB_DSN: ${DB_DSN:?DB_DSN belum diisi di deploy/.env}
+      # Atlas menulis berkas kecil ke $HOME; akar kontainer hanya-baca.
+      HOME: /tmp
+    tmpfs: ["/tmp:size=16m"]
+    volumes:
+      - ../migrations:/migrations:ro
+      - ./atlas.hcl:/deploy/atlas.hcl:ro
+    command: ["migrate", "apply", "--env", "deploy", "--config", "file:///deploy/atlas.hcl"]
+    # `depan` ikut: jaringan `dalam` internal (tanpa rute ke luar), sedangkan
+    # database bisa berada di luar stack ini.
+    networks: [depan, dalam]
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+
+volumes:
+  data_db:
+  unggahan:
+
+# Subnet dipilih SEKALI oleh install.sh (atur_jaringan) dan disimpan di .env:
+# subnet tetap di berkas ini bisa bentrok dengan jaringan kantor/VPN.
+networks:
+  depan:
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:?DOCKER_SUBNET belum diisi - jalankan ./install.sh}
+  dalam:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET_DALAM:?DOCKER_SUBNET_DALAM belum diisi - jalankan ./install.sh}

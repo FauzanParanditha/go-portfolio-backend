@@ -1,0 +1,21 @@
+# Konteks build = akar repo. Yang tidak dibutuhkan build tidak boleh ikut,
+# terutama rahasia: `COPY` yang ceroboh adalah jalan paling umum sebuah .env
+# masuk ke lapisan image.
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+
+.git
+.github
+.claude
+bin
+tmp
+uploads
+docs/*.md
+docs/*.json
+deploy/.versi
+deploy/.cabang
+deploy/docker-compose.override.yml
