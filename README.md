@@ -87,6 +87,9 @@ make seed            # buat user admin + data contoh (idempotent)
 make build           # build binary ke bin/portfolio-backend
 make fmt             # go fmt
 make vet             # go vet
+make test            # semua test, dengan race detector
+make cek             # go vet + berkas yang belum di-gofmt (tidak mengubah berkas)
+make periksa         # gerbang rilis — jalankan sebelum mengirim perubahan
 make swagger         # regenerate dokumentasi Swagger
 ```
 
@@ -107,9 +110,26 @@ Konfigurasi environment migrasi ada di [`atlas.hcl`](atlas.hcl) (`dev`, `staging
 ### Testing
 
 ```sh
-go test ./...                                              # semua test
+make test                                                  # semua test (go test -race ./...)
 go test ./internal/http/middleware/ -run TestAdminRoute -v # satu test
 ```
+
+### Gerbang rilis
+
+`make periksa` (= `bash tools/periksa.sh`) menjalankan semua pemeriksaan
+sekaligus dan melaporkan seluruh kegagalan dalam satu putaran; CI menjalankan
+skrip yang sama.
+
+| # | Pemeriksaan | Di repo ini |
+|---|---|---|
+| 1 | Statis | `go vet`, `gofmt -l` |
+| 2 | Build | `go build` ke `bin/` |
+| 3 | Pola berbahaya | `exec.Command`, `InsecureSkipVerify`, SQL lewat `Sprintf`, `math/rand` |
+| 4 | Rahasia di yang dikirim | kunci privat / `.env` di dalam binary |
+| 5 | Tiap route berpenjaga | `TestSemuaRouteBerpenjaga` menelusuri router asli; route publik harus tertulis di `routePublik` |
+| 6 | Audit dependensi | `govulncheck` — pasang dengan `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+| 7 | Uji asap | belum ada |
+| 8 | Aturan kontainer | dilewati selama belum ada Dockerfile |
 
 ## Struktur Proyek
 

@@ -2,7 +2,7 @@ APP_NAME=portfolio-backend
 CMD_PATH=./cmd/api
 ATLAS_ENV=dev
 
-.PHONY: seed import run build tidy migrate-new migrate-up migrate-down migrate-down-to migrate-down-all migrate-status fmt vet test
+.PHONY: seed import run dev build tidy migrate-new migrate-up migrate-down migrate-down-to migrate-down-all migrate-status fmt vet test cek periksa swagger
 
 ## ------- Development Commands ------- ##
 
@@ -31,6 +31,20 @@ vet:
 ## Tidy dependency
 tidy:
 	go mod tidy
+
+## Semua test, dengan race detector
+test:
+	go test -race ./...
+
+## Pemeriksaan statis: go vet + berkas yang belum di-gofmt (tidak mengubah berkas)
+cek:
+	go vet ./...
+	@belum="$$(gofmt -l . | grep -v /vendor/)"; \
+	if [ -n "$$belum" ]; then echo "$$belum"; echo "berkas di atas belum diformat - jalankan: make fmt"; exit 1; fi
+
+## Gerbang rilis: jalankan sebelum mengirim perubahan (lihat tools/periksa.sh)
+periksa:
+	bash tools/periksa.sh
 
 
 ## Impor proyek dari berkas JSON (tanpa panel admin)
