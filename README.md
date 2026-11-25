@@ -129,7 +129,22 @@ skrip yang sama.
 | 5 | Tiap route berpenjaga | `TestSemuaRouteBerpenjaga` memanggil tiap endpoint router asli; route publik harus tertulis di `routePublik`, pemasangan lewat `Use`/`Static` di `jalurUse` (batasannya ada di kepala berkas test) |
 | 6 | Audit dependensi | `govulncheck` — pasang dengan `go install golang.org/x/vuln/cmd/govulncheck@latest` |
 | 7 | Uji asap | belum ada |
-| 8 | Aturan kontainer | dilewati selama belum ada Dockerfile |
+| 8 | Aturan kontainer | `deploy/Dockerfile` dan `deploy/docker-compose.yml`: tag image persis, non-root, `HEALTHCHECK`, `.dockerignore`, port dengan alamat ikat eksplisit |
+
+## Deploy & operasional
+
+Produksi berjalan sebagai image Docker di bawah Docker Compose, dikendalikan
+empat skrip di akar repo:
+
+| Skrip | Kegunaan |
+|---|---|
+| `sudo ./install.sh` | pasang pertama kali / terapkan perubahan konfigurasi (aman diulang) |
+| `sudo ./update.sh` | pasang versi baru; `--rollback` kembali ke versi sebelumnya |
+| `sudo ./status.sh` | keadaan tiap komponen beserta sebab dan saran (`--ringkas`, `--json`) |
+| `sudo ./backup.sh` | cadangkan database + unggahan; `--daftar`, `--pulihkan=<berkas> --ya` |
+
+Rinciannya di [`docs/PEMELIHARAAN.md`](docs/PEMELIHARAAN.md); topologi domain,
+cookie, dan reverse proxy di [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Struktur Proyek
 

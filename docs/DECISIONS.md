@@ -225,6 +225,40 @@ Format: `ADR-NNN | Judul | Status | Tanggal`. Status: `Accepted`, `Superseded`, 
 
 ---
 
+## ADR-015 | Produksi berjalan sebagai image Docker di bawah Docker Compose | Accepted | 2026-11
+
+**Konteks.** Deploy sebelumnya berupa langkah manual (`make build`, jalankan
+binary). Tidak ada cara baku untuk memperbarui, mundur, memeriksa keadaan, atau
+mencadangkan data. Server yang dituju satu VM kecil (2 vCPU, ±3 GB RAM), build
+dilakukan di server itu, dan belum ada reverse proxy di depannya.
+
+**Keputusan.**
+- Satu stack Compose per repo (`deploy/docker-compose.yml`): `api` (distroless,
+  non-root, akar hanya-baca), `db` (PostgreSQL, profil `db`, jaringan internal,
+  tidak dipublikasikan), `migrate` (Atlas, sekali jalan).
+- Dikendalikan lewat `install.sh`, `update.sh`, `status.sh`, `backup.sh` di
+  atas `deploy/lib-dasar.sh` (salinan apa adanya dari skill project-standard).
+- Image bertanda versi (`<commit>-<waktu>`); versi sebelumnya disimpan untuk
+  `update.sh --rollback`. Migrasi dijalankan sebelum versi baru dinyalakan.
+- Tidak ada nginx di dalam stack. Port API diikat ke `ALAMAT_IKAT` (bawaan
+  `127.0.0.1`); TLS dan routing adalah urusan reverse proxy di luar stack.
+- Frontend tetap repo terpisah dengan stack-nya sendiri (bukan monorepo).
+
+**Konsekuensi.**
+- Skrip disusun dari aturan skill dan diuji di VM Linux lokal, bukan diturunkan
+  dari repo acuan berbentuk sama. Yang sengaja belum dibuat: `pantau.sh`, skrip
+  firewall, perpanjangan sertifikat, salinan cadangan di luar server.
+- `--rollback` tidak membatalkan migrasi: migrasi harus aditif.
+- Pemilik folder repo di server setara root (cron dan systemd menjalankan skrip
+  dari sana); dianjurkan clone sebagai root di `/opt`.
+- Tanpa TLS, `install.sh` menolak membuka port API ke semua antarmuka kecuali
+  `IZINKAN_HTTP_TERBUKA=ya`.
+- `migrations/atlas.sum` wajib ikut di-commit; kalau tidak, update dibatalkan.
+- Cadangan berada di disk yang sama dengan datanya sampai ada keputusan tempat
+  salinan luar.
+
+---
+
 ## Template entri baru
 
 ```

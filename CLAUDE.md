@@ -136,6 +136,24 @@ has `*_dto.go` files defining request structs with `validate:` tags; map DTO→m
   it applies to the whole app.
 - `.env` is gitignored and must stay untracked; `.env.example` documents the keys.
 
+## Deploy & operational scripts
+
+Production runs as a Docker image under Docker Compose (`deploy/Dockerfile`, `deploy/docker-compose.yml`,
+`deploy/env.example`), driven by `install.sh`, `update.sh`, `status.sh`, `backup.sh` at the repo root. See
+`docs/PEMELIHARAAN.md` (commands, traps, incident checklist) and ADR-015 in `docs/DECISIONS.md`.
+
+- `deploy/lib-dasar.sh` is a **verbatim copy** from the project-standard skill — never edit it here; project
+  functions go in `deploy/lib.sh`.
+- The runtime image is distroless: no shell. The container healthcheck is the `cmd/healthcheck` binary.
+- A new env key the app needs in production must be added to `deploy/env.example` (`update.sh` copies new
+  keys into the server's `deploy/.env`) **and** to the `environment:` list of the `api` service in
+  `deploy/docker-compose.yml` — the container only receives keys listed there, not the whole `deploy/.env`
+  (`internal/config/deploy_env_test.go` fails when one is missing).
+- Every migration must be committed together with an up-to-date `migrations/atlas.sum`, and be additive:
+  `update.sh --rollback` does not undo migrations.
+- The scripts were tested on a local Linux VM (install, re-install, update, failed update, rollback, backup,
+  restore). Re-run that kind of test after changing them; they run as root on the server.
+
 ## API docs
 
 Swagger annotations live in handler comments; `make swagger` regenerates `docs/`. UI is served at `/swagger/*`
