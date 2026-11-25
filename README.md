@@ -125,8 +125,8 @@ skrip yang sama.
 | 1 | Statis | `go vet`, `gofmt -l` |
 | 2 | Build | `go build` ke `bin/` |
 | 3 | Pola berbahaya | `exec.Command`, `InsecureSkipVerify`, SQL lewat `Sprintf`, `math/rand` |
-| 4 | Rahasia di yang dikirim | kunci privat / `.env` di dalam binary |
-| 5 | Tiap route berpenjaga | `TestSemuaRouteBerpenjaga` menelusuri router asli; route publik harus tertulis di `routePublik` |
+| 4 | Rahasia di yang dikirim | kunci privat yang tertanam di binary; berkas `.env`, `*.pem`, `*.key` di `bin/` |
+| 5 | Tiap route berpenjaga | `TestSemuaRouteBerpenjaga` memanggil tiap endpoint router asli; route publik harus tertulis di `routePublik`, pemasangan lewat `Use`/`Static` di `jalurUse` (batasannya ada di kepala berkas test) |
 | 6 | Audit dependensi | `govulncheck` — pasang dengan `go install golang.org/x/vuln/cmd/govulncheck@latest` |
 | 7 | Uji asap | belum ada |
 | 8 | Aturan kontainer | dilewati selama belum ada Dockerfile |

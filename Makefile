@@ -36,10 +36,12 @@ tidy:
 test:
 	go test -race ./...
 
-## Pemeriksaan statis: go vet + berkas yang belum di-gofmt (tidak mengubah berkas)
+## Pemeriksaan statis: go vet + berkas yang belum di-gofmt (tidak mengubah berkas).
+## gofmt hanya atas berkas yang dikenal git, supaya folder ter-ignore
+## (mis. .claude/worktrees) tidak ikut diperiksa.
 cek:
 	go vet ./...
-	@belum="$$(gofmt -l . | grep -v /vendor/)"; \
+	@belum="$$(git ls-files -co --exclude-standard -z -- '*.go' | xargs -0 gofmt -l)"; \
 	if [ -n "$$belum" ]; then echo "$$belum"; echo "berkas di atas belum diformat - jalankan: make fmt"; exit 1; fi
 
 ## Gerbang rilis: jalankan sebelum mengirim perubahan (lihat tools/periksa.sh)

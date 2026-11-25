@@ -3,6 +3,7 @@ package http_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -13,8 +14,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Invarian struktural: SETIAP route yang didaftarkan router asli harus
-// berpenjaga, kecuali yang tertulis di routePublik di bawah.
+// Invarian struktural: setiap endpoint ber-handler yang didaftarkan router asli
+// harus berpenjaga, kecuali yang tertulis di routePublik di bawah.
 //
 // Test lain (middleware/require_role_test.go) membuktikan rantai AuthJWT +
 // RequireRole bekerja pada app rakitan. Test ini membuktikan hal yang berbeda:
@@ -31,6 +32,15 @@ import (
 // DB-free: request tanpa kredensial berhenti di AuthJWT (401) dan token
 // non-admin berhenti di RequireRole (403) — keduanya sebelum handler, jadi
 // repository (DB nil) tidak pernah tersentuh.
+//
+// BATAS yang perlu diketahui (test ini tidak menggantikan review):
+//   - Handler yang dipasang lewat `Use`/`Static` tidak punya route sendiri untuk
+//     dipanggil. Yang dijaga hanyalah DAFTAR path-nya (jalurUse): path Use baru
+//     menggagalkan test sampai seseorang menuliskannya beserta alasannya.
+//     Middleware baru di path yang SUDAH terdaftar (mis. "/") tidak terdeteksi.
+//   - Pemeriksaan role (403) hanya untuk awalan /api/v1/admin. Route berpenjaga
+//     di luar awalan itu (mis. /me) cukup menolak request tanpa kredensial;
+//     endpoint khusus admin HARUS berada di bawah /api/v1/admin.
 
 // routePublik adalah daftar route yang MEMANG boleh diakses tanpa kredensial.
 // Menambah baris di sini adalah keputusan sadar yang terlihat saat review —
@@ -54,7 +64,22 @@ var routePublik = map[string]string{
 	"POST /api/v1/contact-messages":     "alias form kontak; berbagi jatah yang sama",
 }
 
-const awalanAdmin = "/api/v1/admin/"
+// jalurUse adalah daftar path tempat sesuatu dipasang lewat `Use` atau
+// `Static`. Pemasangan seperti itu tidak muncul sebagai route yang bisa
+// dipanggil test ini, sehingga `app.Use("/internal", handler)` akan menjadi
+// endpoint tanpa penjaga yang tak terlihat. Path baru harus ditulis di sini
+// beserta alasannya.
+var jalurUse = map[string]string{
+	"/":             "middleware global (RegisterGlobal): recover, batas body, helmet, requestid, dst.",
+	"/uploads":      "app.Static — penyajian berkas unggahan, publik secara sengaja",
+	"/api/v1/admin": "pasangan penjaga AuthJWT + RequireRole(\"admin\") tiap grup admin",
+}
+
+const akarAdmin = "/api/v1/admin"
+
+func routeAdmin(path string) bool {
+	return path == akarAdmin || strings.HasPrefix(path, akarAdmin+"/")
+}
 
 // tokenPeran membuat JWT HS256 sah (tanda tangan & masa berlaku benar) untuk
 // role tertentu, supaya penolakan yang diamati benar-benar berasal dari
@@ -81,19 +106,29 @@ func tokenPeran(t *testing.T, secret, role string) string {
 	return signed
 }
 
+var (
+	segmenParameter = regexp.MustCompile(`^:[A-Za-z_][A-Za-z0-9_]*$`)
+	segmenPolos     = regexp.MustCompile(`^[A-Za-z0-9._~-]*$`)
+)
+
 // isiParameter mengganti segmen ":nama" dan "*" dengan nilai konkret agar path
-// yang didaftarkan bisa dipanggil.
-func isiParameter(path string) string {
+// yang didaftarkan bisa dipanggil. Hanya dua bentuk itu yang dipahami. Sintaks
+// lain (constraint ":id<int>", opsional ":id?", "+", parameter di tengah
+// segmen) ditolak: bila nilai tebakan tidak cocok dengan route-nya, request
+// jatuh ke middleware lain dan test lulus tanpa pernah menyentuh route itu.
+func isiParameter(path string) (string, bool) {
 	segmen := strings.Split(path, "/")
 	for i, s := range segmen {
 		switch {
-		case strings.HasPrefix(s, ":"):
+		case segmenParameter.MatchString(s):
 			segmen[i] = "11111111-1111-1111-1111-111111111111"
 		case s == "*":
 			segmen[i] = "x"
+		case !segmenPolos.MatchString(s):
+			return "", false
 		}
 	}
-	return strings.Join(segmen, "/")
+	return strings.Join(segmen, "/"), true
 }
 
 func statusRoute(t *testing.T, app *fiber.App, method, path, token string) int {
@@ -116,9 +151,14 @@ func TestSemuaRouteBerpenjaga(t *testing.T) {
 	app := newRouter(t, cfg)
 	tokenBukanAdmin := tokenPeran(t, cfg.JWTSecret, "user")
 
-	// GetRoutes(true) membuang route yang dipasang lewat Use/Static. Artinya
-	// penyajian berkas /uploads (app.Static, publik secara sengaja) tidak
-	// termasuk di sini; yang diperiksa adalah semua endpoint ber-handler.
+	// Satu request dulu: route milik sub-app (`app.Mount`) baru masuk daftar
+	// setelah Fiber menjalankan proses startup-nya, yang dipicu request pertama.
+	if got := statusRoute(t, app, http.MethodGet, "/healthz", ""); got != http.StatusOK {
+		t.Fatalf("GET /healthz: status %d, seharusnya 200", got)
+	}
+
+	// GetRoutes(true) hanya memuat endpoint ber-handler; pemasangan lewat
+	// Use/Static dibuang dan diperiksa terpisah di bawah (jalurUse).
 	routes := app.GetRoutes(true)
 
 	terlihat := map[string]bool{}
@@ -134,13 +174,18 @@ func TestSemuaRouteBerpenjaga(t *testing.T) {
 		}
 		if _, publik := routePublik[kunciPublik]; publik {
 			terlihat[kunciPublik] = true
-			if strings.HasPrefix(r.Path, awalanAdmin) {
+			if routeAdmin(r.Path) {
 				t.Errorf("%s: route admin tidak boleh ada di routePublik", kunci)
 			}
 			continue
 		}
 
-		path := isiParameter(r.Path)
+		path, ok := isiParameter(r.Path)
+		if !ok {
+			t.Errorf("%s: sintaks path tidak dipahami test ini, jadi route-nya tidak bisa "+
+				"dipastikan terpanggil — perluas isiParameter dengan nilai contoh yang cocok", kunci)
+			continue
+		}
 
 		if got := statusRoute(t, app, r.Method, path, ""); got != http.StatusUnauthorized {
 			t.Errorf("%s tanpa kredensial: status %d, seharusnya 401 — "+
@@ -148,7 +193,7 @@ func TestSemuaRouteBerpenjaga(t *testing.T) {
 		}
 		berpenjaga++
 
-		if strings.HasPrefix(r.Path, awalanAdmin) {
+		if routeAdmin(r.Path) {
 			if got := statusRoute(t, app, r.Method, path, tokenBukanAdmin); got != http.StatusForbidden {
 				t.Errorf("%s dengan token role \"user\": status %d, seharusnya 403 — "+
 					"grup admin wajib AuthJWT lalu RequireRole(\"admin\")", kunci, got)
@@ -177,5 +222,42 @@ func TestSemuaRouteBerpenjaga(t *testing.T) {
 	sort.Strings(basi)
 	for _, kunci := range basi {
 		t.Errorf("routePublik memuat %q yang tidak terdaftar di router — hapus barisnya", kunci)
+	}
+
+	// Pemasangan lewat Use/Static = selisih daftar lengkap dan daftar
+	// ber-handler, dihitung per "METHOD path" agar Use di path yang sama dengan
+	// sebuah endpoint tetap terlihat.
+	sisa := map[string]int{}
+	for _, r := range app.GetRoutes() {
+		sisa[r.Method+" "+r.Path]++
+	}
+	for _, r := range routes {
+		sisa[r.Method+" "+r.Path]--
+	}
+	jalurTerpasang := map[string]bool{}
+	for kunci, n := range sisa {
+		if n > 0 {
+			jalurTerpasang[kunci[strings.Index(kunci, " ")+1:]] = true
+		}
+	}
+	var jalur []string
+	for p := range jalurTerpasang {
+		jalur = append(jalur, p)
+	}
+	for p := range jalurUse {
+		if !jalurTerpasang[p] {
+			jalur = append(jalur, p)
+		}
+	}
+	sort.Strings(jalur)
+	for _, p := range jalur {
+		_, tercatat := jalurUse[p]
+		switch {
+		case jalurTerpasang[p] && !tercatat:
+			t.Errorf("ada Use/Static di %q yang tidak tercatat di jalurUse — handler yang dipasang "+
+				"begitu tidak diperiksa test ini; pastikan ia berpenjaga lalu catat alasannya", p)
+		case !jalurTerpasang[p] && tercatat:
+			t.Errorf("jalurUse memuat %q yang tidak lagi dipasang di router — hapus barisnya", p)
+		}
 	}
 }

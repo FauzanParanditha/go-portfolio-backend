@@ -29,7 +29,13 @@ cd "$AKAR" || exit 1
 # Kosongkan (atau biarkan) untuk tebakan otomatis.
 STACK="go"               # node | go | go+node | rust | python
 SUMBER=()                # folder yang dipindai pola berbahaya
-PERINTAH_CEK=()          # pemeriksaan statis
+# gofmt atas berkas yang dikenal git (terlacak + baru yang tidak di-ignore),
+# bukan `gofmt -l .`: folder ter-ignore seperti .claude/worktrees berisi salinan
+# repo milik agen, dan salinan yang belum diformat membuat gerbang merah di
+# laptop sementara CI hijau.
+PERINTAH_CEK=(bash -c 'go vet ./... || exit 1
+  belum=$(git ls-files -co --exclude-standard -z -- "*.go" | xargs -0 gofmt -l) || exit 1
+  [ -z "$belum" ] || { echo "belum di-gofmt (jalankan: make fmt):"; echo "$belum"; exit 1; }')
 PERINTAH_BUILD=()
 # Tanpa bungkus bash -c supaya alat yang belum terpasang dilaporkan dengan
 # namanya. Pasang: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -37,7 +43,9 @@ PERINTAH_AUDIT=(govulncheck ./...)
 PERINTAH_UJI=()          # uji asap; kosong = belum ada
 POLA=""                  # pola berbahaya (regex grep -E)
 EKSTENSI=()              # berkas yang dipindai pola, mis. (--include='*.go' --include='*.ts'); kosong = per stack
-LEWATI_DIR=(tmp uploads) # tmp = keluaran air (make dev); uploads = berkas unggahan, bukan sumber
+# tmp = keluaran air (make dev); uploads = berkas unggahan, bukan sumber;
+# .claude = konfigurasi dan worktree agen (ter-ignore), bukan bagian dari yang dikirim.
+LEWATI_DIR=(tmp uploads .claude)
 # [portfolio] Temuan pola berbahaya yang SAH: satu regex (grep -E) per baris,
 # dicocokkan ke "berkas:isi baris" (tanpa nomor baris, spasi awal dibuang).
 # Tulis sesempit mungkin dan beri alasan di komentar — jangan melebarkan POLA.
@@ -55,7 +63,11 @@ KIRIM=(bin)              # tiga binary hasil build: api, seed, import
 # pertama memang akan ramai, dan menyetelnya justru bagian yang berguna.
 # Header PEM ditulis lengkap: "PRIVATE KEY" saja cocok dengan pesan galat
 # crypto/tls di pustaka standar Go (alarm palsu di setiap binary Go).
-RAHASIA='SESSION_SECRET|DB_PASSWORD|-----BEGIN [A-Z ]*PRIVATE KEY-----|createCipheriv'
+# Repo ini: hanya header kunci privat. NAMA env rahasia (JWT_SECRET, DB_DSN,
+# SMTP_PASSWORD) memang ada di binary — kode membacanya lewat os.Getenv — jadi
+# tidak bisa dijadikan pola. Yang ditolak pemeriksaan 4: kunci privat yang
+# tertanam di binary, dan berkas .env / *.pem / *.key yang ikut masuk bin/.
+RAHASIA='-----BEGIN [A-Z ]*PRIVATE KEY-----'
 # Contoh menambah host internal yang persis:
 #   RAHASIA="$RAHASIA|10\.10\.13\.175|PANDI-SECURITY-0\.1"
 
@@ -70,10 +82,17 @@ PENJAGA='getAuth|requireSession|izin\(|butuhSesi'
 PUBLIK=()
 # [portfolio] Bila diisi, pemeriksaan 5 menjalankan perintah ini (dan ROUTE_DIR
 # diabaikan). ROUTE_ALASAN: alasan pemeriksaan 5 tidak berlaku di repo ini.
-# Test ini menelusuri SEMUA route router asli: tanpa kredensial harus 401,
+# Test ini memanggil tiap endpoint router asli: tanpa kredensial harus 401,
 # /admin/* dengan token non-admin harus 403, kecuali daftar publik eksplisit di
-# internal/http/router_penjaga_test.go (routePublik).
-PERINTAH_PENJAGA=(go test ./internal/http -run '^TestSemuaRouteBerpenjaga$' -count=1)
+# internal/http/router_penjaga_test.go (routePublik). Batasannya tertulis di
+# kepala berkas test itu.
+#
+# Baris "--- PASS" dituntut: `go test -run <nama>` keluar 0 juga saat TIDAK ada
+# test yang cocok, jadi test yang di-rename atau dihapus akan membuat
+# pemeriksaan ini hijau tanpa menguji apa pun.
+PERINTAH_PENJAGA=(bash -c 'k=$(go test ./internal/http -run "^TestSemuaRouteBerpenjaga\$" -count=1 -v 2>&1); s=$?
+  printf "%s\n" "$k" | grep -vE "^\{"
+  [ "$s" -eq 0 ] && printf "%s\n" "$k" | grep -q "^--- PASS: TestSemuaRouteBerpenjaga "')
 ROUTE_ALASAN=""
 # ───────────────────────── AKHIR KONFIGURASI ─────────────────────────
 
@@ -183,9 +202,15 @@ else
   if [ -n "$temu" ] && [ ${#KECUALI[@]} -gt 0 ]; then
     sisa=""
     while IFS= read -r baris; do
-      kunci=$(printf '%s' "$baris" | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*/\1:/')
+      # "./" di depan dibuang (muncul bila SUMBER=(.)), supaya regex ditulis
+      # terhadap path relatif repo. Entri kosong dilewati: regex kosong
+      # cocok dengan semua baris dan akan membungkam seluruh pemeriksaan.
+      kunci=$(printf '%s' "$baris" | sed -E 's/^(\.\/)?([^:]+):[0-9]+:[[:space:]]*/\2:/')
       sah=0
-      for k in "${KECUALI[@]}"; do printf '%s' "$kunci" | grep -qE -- "$k" && sah=1; done
+      for k in "${KECUALI[@]}"; do
+        [ -n "$k" ] || continue
+        printf '%s' "$kunci" | grep -qE -- "$k" && sah=1
+      done
       [ $sah -eq 1 ] || sisa+="$baris"$'\n'
     done <<< "$temu"
     temu="${sisa%$'\n'}"
