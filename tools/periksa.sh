@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Gerbang rilis — dijalankan sebelum mengirim perubahan (`task periksa` /
-# `npm run periksa`). Tidak bergantung pada runner: CI dan server polos bisa
+# Gerbang rilis — dijalankan sebelum mengirim perubahan (`make periksa`).
+# Tidak bergantung pada runner: CI dan server polos bisa
 # menjalankannya langsung (bash tools/periksa.sh).
 #
 # Delapan pemeriksaan, masing-masing menolak satu kelas kesalahan. Tidak berhenti
