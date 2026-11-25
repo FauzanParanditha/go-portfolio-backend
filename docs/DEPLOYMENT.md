@@ -224,14 +224,27 @@ startup.
 
 ## Langkah deploy
 
-1. **Siapkan env** sesuai tabel di atas. `JWT_SECRET` minimal 32 karakter:
-   `openssl rand -base64 48`.
-2. **Audit data URL proyek lama (WAJIB sebelum deploy versi dengan validasi
-   URL http/https).** Lihat bagian [Audit URL proyek](#audit-url-proyek-sebelum-deploy).
-3. **Jalankan migration:** `make migrate-up` (Atlas: hash lalu apply).
-4. **Seed admin pertama:** `make seed` — idempoten, aman diulang.
-5. **Build & jalankan:** `make build` lalu jalankan `bin/portfolio-backend`.
-6. **Verifikasi** dengan langkah di bawah.
+Backend dipasang sebagai image Docker di bawah Docker Compose; perintah harian
+dan penanganan masalahnya ada di [PEMELIHARAAN.md](PEMELIHARAAN.md).
+
+1. **Clone repo di server**, lalu `sudo ./install.sh`. Skrip itu menanyakan
+   alamat publik, membuat `deploy/.env` beserta rahasianya (`JWT_SECRET`, sandi
+   database, password admin pertama), membangun image, menjalankan migrasi,
+   membuat admin pertama, dan menyalakan API. Aman diulang.
+2. **Sesuaikan env cookie/CORS** di `deploy/.env` menurut topologi di atas, lalu
+   `sudo ./install.sh --non-interactive`.
+3. **Audit data URL proyek lama** bila database berasal dari versi sebelum
+   validasi URL http/https. Lihat bagian [Audit URL proyek](#audit-url-proyek-sebelum-deploy).
+4. **Verifikasi** dengan `sudo ./status.sh` dan langkah di bawah.
+5. **Versi berikutnya:** `sudo ./update.sh`.
+
+Port API diikat ke `127.0.0.1` secara bawaan (`ALAMAT_IKAT`), untuk reverse
+proxy di host yang sama. Membukanya langsung (`0.0.0.0`) melewati UFW dan,
+tanpa TLS, membuat login admin tidak berfungsi — lihat jebakan di
+PEMELIHARAAN.md.
+
+Tanpa Docker (laptop, percobaan): `make migrate-up`, `make seed`, `make build`,
+lalu jalankan `bin/portfolio-backend`.
 
 Swagger UI **tidak** dipasang saat `APP_ENV=production` — itu disengaja.
 
