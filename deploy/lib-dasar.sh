@@ -155,21 +155,60 @@ git_repo() {
 # itu 600, sehingga git pemilik folder gagal "Permission denied" (.git/index)
 # dan versi tercatat "manual-…". Dipanggil root sebelum git_repo: kembalikan
 # .git, berkas terlacak, dan foldernya ke pemilik folder repo.
+#
+# Fungsi ini berjalan sebagai ROOT atas folder milik pengguna biasa, jadi
+# pemilik folder tidak boleh bisa mengarahkannya. Tiga hal yang dulu bisa:
+#  · git TIDAK dijalankan sebagai root. .git/config milik pemilik folder dapat
+#    menyuruh git menjalankan program (core.fsmonitor, core.pager, …); dulu
+#    `git ls-files` di sini mengeksekusinya sebagai root. Sekarang .git
+#    dikembalikan dulu dengan chown (tanpa git), baru daftar berkas terlacak
+#    ditanyakan ke git SEBAGAI PEMILIK (git_repo).
+#  · Yang di-chown hanya path yang terlacak menurut git DAN ditemukan `find`
+#    bukan milik pemilik — dan `find` tidak menyeberangi symlink. Dulu daftar
+#    dari git dipakai langsung: folder terlacak yang diganti symlink ke luar
+#    repo membuat root menyerahkan berkas di sana (mis. /etc/shadow) kepada
+#    pemilik folder.
+#  · Daftar dipisah NUL. Nama berkas boleh memuat baris baru, dan dengan
+#    pemisah baris satu nama bisa menyamar sebagai dua path.
+# Berkas biasa ber-hardlink lebih dari satu dilewati (nama kedua bisa berada di
+# luar repo). Sisa yang diketahui: jeda sesaat antara `find` dan `chown` —
+# menutupnya butuh chown lewat deskriptor berkas, yang tidak ada di bash.
+# TIDAK BOLEH menghentikan pemanggil (set -e + pipefail): galat apa pun
+# dianggap "tidak ada yang perlu dirapikan".
 rapikan_pemilik_repo() {
-  local p asing; p="$(stat -c %U "$AKAR" 2>/dev/null || echo root)"
-  [[ $EUID -eq 0 && "$p" != root && -d "$AKAR/.git" ]] || return 0
-  _terlacak() { git -c safe.directory="$AKAR" -C "$AKAR" ls-files -z 2>/dev/null; }
-  # Hanya membaca, dan TIDAK BOLEH menghentikan pemanggil (set -e + pipefail):
-  # tanpa `head` (SIGPIPE), dan galat apa pun dianggap "tidak ada temuan".
-  asing="$( { find "$AKAR/.git" ! -user "$p" -print 2>/dev/null
-              _terlacak | (cd "$AKAR" && xargs -0 -r stat -c '%U %n' 2>/dev/null) \
-                | awk -v p="$p" '$1 != p { sub(/^[^ ]+ /, ""); print }'
-            } | sed -n 1p )" || true
-  [[ -n "$asing" ]] || return 0
-  kuning "berkas repo milik selain $p (mis. $asing) — git pernah dijalankan dengan sudo? Dikembalikan ke $p. Jangan 'sudo git'; update.sh yang menarik kode." >&2
-  chown -R "$p": "$AKAR/.git"
-  ( cd "$AKAR" && _terlacak | xargs -0 -r chown -h "$p":
-    _terlacak | tr '\0' '\n' | sed -n 's#/[^/]*$##p' | sort -u | tr '\n' '\0' | xargs -0 -r chown "$p": )
+  local p sp f d asing=""
+  p="$(stat -c %U "$AKAR" 2>/dev/null || echo root)"
+  [[ $EUID -eq 0 && "$p" != root && -d "$AKAR/.git" && ! -L "$AKAR/.git" ]] || return 0
+  sp="$(mktemp -d 2>/dev/null)" || return 0   # milik root, 700
+
+  # 1. .git lebih dulu, tanpa git. `chown -R -h` tidak mengikuti symlink.
+  asing="$(find "$AKAR/.git" ! -user "$p" -print -quit 2>/dev/null || true)"
+  [[ -z "$asing" ]] || chown -R -h "$p": "$AKAR/.git" 2>/dev/null || true
+
+  # 2. Kandidat: isi pohon kerja yang bukan milik pemilik, sebagaimana DILIHAT
+  #    `find` (tidak pernah masuk lewat symlink).
+  find "$AKAR" -mindepth 1 -xdev -path "$AKAR/.git" -prune -o \
+       ! -user "$p" \( -type d -o -links 1 \) -printf '%P\0' 2>/dev/null \
+    | LC_ALL=C sort -zu >"$sp/kandidat" || true
+
+  if [[ -s "$sp/kandidat" ]]; then
+    # 3. Yang boleh disentuh: berkas terlacak dan folder-folder induknya.
+    { git_repo ls-files -z 2>/dev/null || true; } |
+      while IFS= read -r -d '' f; do
+        printf '%s\0' "$f"; d="$f"
+        while [[ "$d" == */* ]]; do d="${d%/*}"; printf '%s\0' "$d"; done
+      done | LC_ALL=C sort -zu >"$sp/boleh" || true
+    LC_ALL=C comm -z -12 "$sp/boleh" "$sp/kandidat" >"$sp/irisan" 2>/dev/null || true
+    if [[ -s "$sp/irisan" ]]; then
+      [[ -n "$asing" ]] || asing="$AKAR/$(tr '\0' '\n' <"$sp/irisan" | sed -n 1p)"
+      ( cd "$AKAR" && xargs -0 -r chown -h "$p": -- <"$sp/irisan" ) 2>/dev/null || true
+    fi
+  fi
+  rm -rf -- "$sp"
+
+  [[ -z "$asing" ]] \
+    || kuning "berkas repo milik selain $p (mis. $asing) — git pernah dijalankan dengan sudo? Dikembalikan ke $p. Jangan 'sudo git'; update.sh yang menarik kode." >&2
+  return 0
 }
 versi_baru() { printf '%s-%s' "$(git_repo rev-parse --short HEAD 2>/dev/null || echo manual)" "$(date +%Y%m%d%H%M)"; }
 

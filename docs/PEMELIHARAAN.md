@@ -46,9 +46,9 @@ Jangan menjalankan `docker compose up` polos di `deploy/`, dan jangan
 pemilik folder.
 
 **Pemilik folder repo setara root.** Cron dan unit systemd menjalankan skrip
-dari folder ini sebagai root, dan `update.sh` menjalankan `git` atas `.git`
-milik pemilik folder. Siapa pun yang bisa menulis ke folder ini (atau mem-push
-ke cabang yang diikuti server) bisa menjadi root di server. Karena itu: clone
+dari folder ini sebagai root. Siapa pun yang bisa menulis ke folder ini (atau
+mem-push ke cabang yang diikuti server) bisa menjadi root di server. Karena
+itu: clone
 sebagai root di `/opt/portfolio-backend`, atau perlakukan akun pemiliknya
 seperti akun root. `install.sh` memperingatkan bila pemiliknya bukan root.
 
