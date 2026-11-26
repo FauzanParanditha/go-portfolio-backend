@@ -5,11 +5,13 @@
 #     sudo ./update.sh                 tarik kode terbaru cabang ini lalu pasang
 #     sudo ./update.sh --ref=<tag|cabang|commit>
 #     sudo ./update.sh --no-pull       pasang kode yang sudah ada di folder ini
+#     sudo ./update.sh --bangun-lokal  bangun image di server ini, alih-alih
+#                                      menarik yang dibangun GitHub
 #     sudo ./update.sh --rollback      kembali ke versi sebelumnya
 #     sudo ./update.sh --status        versi aktif dan versi sebelumnya
 #
 #  Urutan: kunci → tolak pohon kerja kotor → tarik kode → lengkapi .env →
-#  bangun image versi baru → cadangkan database → migrasi → ganti API →
+#  tarik image versi baru (dibangun GitHub) → cadangkan database → migrasi → ganti API →
 #  tunggu healthy (tidak healthy = versi lama dinyalakan lagi).
 #  Selama langkah sebelum "ganti API" gagal, versi lama tetap berjalan.
 #
@@ -22,14 +24,15 @@ AKAR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=deploy/lib.sh
 . "$AKAR/deploy/lib.sh"
 
-REF=""; TARIK=1; AKSI=update; ARG_ASLI=("$@")
+REF=""; TARIK=1; AKSI=update; PAKSA_LOKAL=0; ARG_ASLI=("$@")
 for a in "$@"; do
   case "$a" in
     --ref=*) REF="${a#*=}" ;;
     --no-pull) TARIK=0 ;;
+    --bangun-lokal) PAKSA_LOKAL=1 ;;
     --rollback) AKSI=rollback ;;
     --status) AKSI=status ;;
-    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,2\}//'; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,2\}//'; exit 0 ;;
     *) gagal "argumen tidak dikenal: $a (lihat --help)" ;;
   esac
 done
@@ -119,12 +122,12 @@ env_lengkapi_dari "$ENV_CONTOH"
 env_rapikan_ganda
 env_periksa_ganda
 
-# ---------------------------------------------------------------- bangun
+# ---------------------------------------------------------------- image
 BARU="$(versi_baru)"
 # Tag beresolusi menit: dua update dalam semenit dari commit yang sama akan
 # menimpa image versi aktif dan membuat "versi sebelumnya" = dirinya sendiri.
 [[ "$BARU" != "$AKTIF" ]] || BARU="$BARU$(date +%S)"
-bangun "$BARU"
+siapkan_image "$BARU" || gagal "image versi baru tidak tersedia — update dibatalkan, versi $AKTIF tetap berjalan"
 
 # ---------------------------------------------------------------- data
 if db_lokal; then

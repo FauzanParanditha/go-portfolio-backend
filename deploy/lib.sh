@@ -69,10 +69,62 @@ izinkan_baca_mount() {
 }
 
 bangun() { # versi
-  langkah "Membangun image $PROYEK/api:$1"
+  langkah "Membangun image $PROYEK/api:$1 di server ini"
   docker buildx version >/dev/null 2>&1 \
     || gagal "docker buildx tidak ada (Dockerfile butuh BuildKit) — pasang docker-buildx-plugin"
   dcv "$1" build api
+}
+
+# ------------------------------------------------------------------ image dari GitHub
+# Image dibangun GitHub Actions (.github/workflows/image.yml) tiap ada commit di
+# master dan diterbitkan ke registry bertanda SHA commit. Server cukup
+# menariknya — tidak perlu membangun sendiri.
+IMAGE_JAUH_BAWAAN="ghcr.io/fauzanparanditha/go-portfolio-backend"
+image_jauh() { env_atau IMAGE_JAUH "$IMAGE_JAUH_BAWAAN"; }
+# github (bawaan) | lokal. `--bangun-lokal` pada install.sh/update.sh memaksa
+# lokal untuk satu kali jalan.
+sumber_image() {
+  local s; s="$(env_atau SUMBER_IMAGE github)"
+  [[ "${PAKSA_LOKAL:-0}" == 1 ]] && s=lokal
+  case "$s" in github|lokal) printf '%s' "$s" ;; *) gagal "SUMBER_IMAGE harus \"github\" atau \"lokal\" (sekarang: $s)" ;; esac
+}
+
+# tarik <versi>: ambil image untuk commit yang ter-checkout, lalu beri nama lokal
+# $PROYEK/api:<versi>. Sesudah itu ia diperlakukan persis seperti image hasil
+# build lokal (ganti versi, rollback, pemangkasan).
+tarik() {
+  local v="$1" sha jauh rev galat
+  sha="$(git_repo rev-parse HEAD 2>/dev/null)" || gagal "tidak bisa membaca commit yang ter-checkout"
+  jauh="$(image_jauh):$sha"
+  langkah "Menarik image $jauh"
+  if ! galat="$(docker pull -q "$jauh" 2>&1 >/dev/null)"; then
+    printf '%s\n' "$galat" | tail -n 3 >&2
+    merah "Image untuk commit ${sha:0:12} tidak bisa ditarik. Kemungkinan sebabnya:" >&2
+    merah "  · build di GitHub belum selesai atau gagal — lihat tab Actions (workflow \"Image\"), lalu ulangi;" >&2
+    merah "  · commit ini tidak pernah dibangun (hanya ujung tiap push ke master yang dibangun);" >&2
+    merah "  · galat \"unauthorized\"/\"denied\": package di ghcr.io masih privat — ubah menjadi Public;" >&2
+    merah "  · GitHub tidak terjangkau dari server ini." >&2
+    merah "Versi yang sedang berjalan tidak tersentuh. Jalan lain: ulangi dengan --bangun-lokal." >&2
+    return 1
+  fi
+  # Tag bisa ditulis ulang; label revisi ditanam saat build. Keduanya harus
+  # menunjuk commit yang sama dengan kode (dan migrasi) di folder ini.
+  rev="$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$jauh" 2>/dev/null || true)"
+  if [[ "$rev" != "$sha" ]]; then
+    docker image rm "$jauh" >/dev/null 2>&1 || true
+    merah "Image $jauh berlabel revisi \"$rev\", bukan commit $sha — ditolak." >&2
+    return 1
+  fi
+  docker tag "$jauh" "$PROYEK/api:$v"
+  # Hanya melepas nama jauhnya; isi image tetap ada lewat nama lokal.
+  docker image rm "$jauh" >/dev/null 2>&1 || true
+  hijau "image siap: $PROYEK/api:$v"
+}
+
+# siapkan_image <versi>: tarik dari registry, atau bangun di sini.
+siapkan_image() {
+  local s; s="$(sumber_image)" || return 1
+  if [[ "$s" == lokal ]]; then bangun "$1"; else tarik "$1"; fi
 }
 
 # Migrasi dijalankan dari folder migrations/ di kode yang sedang ter-checkout,

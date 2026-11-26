@@ -4,6 +4,8 @@
 #
 #     sudo ./install.sh                    bertanya untuk nilai yang belum diisi
 #     sudo ./install.sh --non-interactive  memakai deploy/.env yang sudah diisi
+#     sudo ./install.sh --bangun-lokal     bangun image di server ini, alih-alih
+#                                          menarik yang dibangun GitHub
 #
 #  Aman diulang: tiap langkah melewati dirinya bila sudah selesai, jadi
 #  menjalankannya lagi adalah cara mengubah konfigurasi. Menjalankan ulang
@@ -20,11 +22,12 @@ AKAR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=deploy/lib.sh
 . "$AKAR/deploy/lib.sh"
 
-INTERAKTIF=1
+INTERAKTIF=1; PAKSA_LOKAL=0
 for a in "$@"; do
   case "$a" in
     --non-interactive) INTERAKTIF=0 ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,2\}//'; exit 0 ;;
+    --bangun-lokal) PAKSA_LOKAL=1 ;;
+    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,2\}//'; exit 0 ;;
     *) gagal "argumen tidak dikenal: $a (lihat --help)" ;;
   esac
 done
@@ -84,7 +87,6 @@ if ! command -v docker >/dev/null; then
 fi
 butuh_perintah docker git curl openssl flock
 butuh_compose
-docker buildx version >/dev/null 2>&1 || gagal "docker buildx tidak ada — pasang docker-buildx-plugin"
 hijau "Docker $(docker version --format '{{.Server.Version}}'), compose $(docker compose version --short)"
 
 # ---------------------------------------------------------------- 2. .env
@@ -146,7 +148,7 @@ if [[ -n "$VERSI_PAKAI" ]] && docker image inspect "$PROYEK/api:$VERSI_PAKAI" >/
   PERTAMA=0
 else
   VERSI_PAKAI="$(versi_baru)"
-  bangun "$VERSI_PAKAI"
+  siapkan_image "$VERSI_PAKAI" || gagal "image tidak tersedia — lihat pesan di atas"
   PERTAMA=1
 fi
 
