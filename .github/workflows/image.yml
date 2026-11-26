@@ -1,0 +1,74 @@
+name: Image
+
+# Membangun image produksi di GitHub supaya server tidak perlu membangunnya
+# sendiri. Server lalu menariknya dengan `sudo ./update.sh` (lihat
+# docs/PEMELIHARAAN.md).
+#
+# - push ke master : bangun → pindai isi image → terbitkan ke ghcr.io,
+#                    bertanda SHA commit (itu yang dicari update.sh).
+# - pull request   : bangun + pindai saja, TIDAK diterbitkan.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: bangun · pindai · terbitkan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Nama image = ghcr.io/<pemilik>/<repo>, huruf kecil (syarat registry).
+      - name: Nama image
+        id: nama
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      # `load: true`: image dimuat ke Docker lokal dulu supaya bisa dipindai.
+      # Belum ada yang diterbitkan pada langkah ini.
+      - name: Bangun
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          tags: ${{ steps.nama.outputs.image }}
+          build-args: |
+            VERSI=${{ github.sha }}
+          # revision dibandingkan update.sh dengan commit yang ter-checkout di
+          # server; source menautkan package ke repo ini.
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Image publik bisa dibongkar siapa saja, lapis demi lapis, dan tidak bisa
+      # ditarik kembali: isinya diperiksa SEBELUM diterbitkan.
+      - name: Pindai isi image
+        run: bash tools/periksa-image.sh "${{ steps.nama.outputs.image }}"
+
+      - name: Masuk ke ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Terbitkan
+        if: github.event_name != 'pull_request'
+        run: docker push "${{ steps.nama.outputs.image }}"

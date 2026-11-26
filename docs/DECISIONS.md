@@ -259,6 +259,37 @@ dilakukan di server itu, dan belum ada reverse proxy di depannya.
 
 ---
 
+## ADR-016 | Image dibangun di GitHub Actions, server hanya menarik | Accepted | 2026-11
+
+**Konteks.** ADR-015 membangun image di server. Server itu satu VM kecil
+(2 vCPU, ±3 GB RAM) yang juga menjalankan layanan lain; build frontend
+(Next.js) memakai 1–2 GB memori dan bisa membuat seluruh server macet.
+
+**Keputusan.**
+- Tiap commit di `master` dibangun workflow `Image`, lalu diterbitkan ke
+  `ghcr.io/<pemilik>/<repo>` bertanda **SHA commit lengkap** (tanpa tag
+  mengambang). `update.sh` menarik image untuk commit yang ter-checkout dan
+  memeriksa label `org.opencontainers.image.revision` sebelum memakainya.
+- Sesudah ditarik, image diberi nama lokal `<proyek>/<layanan>:<versi>`, jadi
+  ganti versi, rollback, dan pemangkasan dari ADR-015 tidak berubah.
+- Isi image dipindai (`tools/periksa-image.sh`, semua lapisan) **sebelum**
+  diterbitkan: repo dan package-nya publik.
+- Build lokal tetap ada sebagai jalan cadangan (`--bangun-lokal`,
+  `SUMBER_IMAGE=lokal`). Di frontend ia ditolak bila memori tersedia di bawah
+  2 GB.
+- Deploy tetap manual (`sudo ./update.sh`). GitHub tidak memegang kunci SSH
+  server.
+
+**Konsekuensi.**
+- `NEXT_PUBLIC_*` frontend berasal dari variabel repo di GitHub, bukan dari
+  `deploy/.env` server; `status.sh` melaporkan bila keduanya berbeda.
+- Update harus menunggu workflow selesai; sebelum itu `update.sh` berhenti
+  tanpa menyentuh versi yang berjalan.
+- Hanya ujung tiap push ke `master` yang punya image.
+- Visibilitas package di `ghcr.io` harus diubah ke Public satu kali.
+
+---
+
 ## Template entri baru
 
 ```

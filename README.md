@@ -139,9 +139,12 @@ empat skrip di akar repo:
 | Skrip | Kegunaan |
 |---|---|
 | `sudo ./install.sh` | pasang pertama kali / terapkan perubahan konfigurasi (aman diulang) |
-| `sudo ./update.sh` | pasang versi baru; `--rollback` kembali ke versi sebelumnya |
+| `sudo ./update.sh` | pasang versi baru (image ditarik dari GitHub; `--bangun-lokal` membangun di server); `--rollback` kembali ke versi sebelumnya |
 | `sudo ./status.sh` | keadaan tiap komponen beserta sebab dan saran (`--ringkas`, `--json`) |
 | `sudo ./backup.sh` | cadangkan database + unggahan; `--daftar`, `--pulihkan=<berkas> --ya` |
+
+Image dibangun GitHub Actions (workflow `Image`) tiap ada commit di `master`,
+dipindai isinya (`tools/periksa-image.sh`), lalu diterbitkan ke `ghcr.io`.
 
 Rinciannya di [`docs/PEMELIHARAAN.md`](docs/PEMELIHARAAN.md); topologi domain,
 cookie, dan reverse proxy di [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).

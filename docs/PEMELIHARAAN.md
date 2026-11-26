@@ -13,7 +13,8 @@ Semua dijalankan dari akar repo di server.
 |---|---|
 | Pasang pertama kali, atau ubah konfigurasi | `sudo ./install.sh` |
 | Apakah berjalan? Kalau tidak, salahnya di mana? | `sudo ./status.sh` |
-| Pasang versi terbaru | `sudo ./update.sh` |
+| Pasang versi terbaru (image ditarik dari GitHub) | `sudo ./update.sh` |
+| Sama, tetapi image dibangun di server ini | `sudo ./update.sh --bangun-lokal` |
 | Pasang tag/cabang/commit tertentu | `sudo ./update.sh --ref=<ref>` |
 | Kembali ke versi sebelumnya | `sudo ./update.sh --rollback` |
 | Versi aktif dan sebelumnya | `sudo ./update.sh --status` |
@@ -86,12 +87,25 @@ seperti akun root. `install.sh` memperingatkan bila pemiliknya bukan root.
 
 ## 3. Pembaruan dan jalan mundur
 
+**Image dibangun di GitHub, bukan di server.** Tiap commit di `master`
+dibangun workflow `Image` (`.github/workflows/image.yml`), dipindai isinya, lalu
+diterbitkan ke `ghcr.io/fauzanparanditha/go-portfolio-backend` bertanda SHA
+commit. Server hanya menariknya.
+
+Alurnya: gabungkan PR ke `master` → tunggu workflow `Image` hijau (±2–3 menit)
+→ di server `sudo ./update.sh`.
+
 `sudo ./update.sh` mengerjakan, berurutan: tarik kode → lengkapi `deploy/.env`
-dengan kunci baru → bangun image versi baru → cadangkan database (label
+dengan kunci baru → tarik image untuk commit itu → cadangkan database (label
 `pra-update`) → migrasi → ganti API → tunggu healthy.
 
-- Gagal **sebelum** "ganti API" (build, cadangan, migrasi): update dibatalkan,
-  versi lama tidak pernah berhenti.
+- Gagal **sebelum** "ganti API" (image belum ada, cadangan, migrasi): update
+  dibatalkan, versi lama tidak pernah berhenti.
+- Image belum ada di registry (build belum selesai atau gagal): skrip berhenti
+  dengan daftar kemungkinan sebabnya. Ulangi sesudah workflow hijau, atau
+  pakai `--bangun-lokal` (build Go ringan, aman dijalankan di server).
+- Hanya **ujung tiap push ke `master`** yang dibangun. `--ref=<commit>` ke
+  commit lain butuh `--bangun-lokal`.
 - API versi baru **tidak healthy**: versi lama dinyalakan lagi secara otomatis.
 - `--rollback` kembali ke versi sebelumnya. **Migrasi tidak dibatalkan**: tulis
   migrasi secara aditif (tambah kolom, isi, baru hapus di rilis berikutnya)
@@ -99,6 +113,18 @@ dengan kunci baru → bangun image versi baru → cadangkan database (label
   `pra-update`.
 
 Update menolak berjalan bila pohon kerja git di server tidak bersih.
+
+### Satu kali, sesudah image pertama terbit
+
+Package baru di `ghcr.io` bisa terbuat **privat** walaupun repo-nya publik, dan
+server lalu gagal menariknya (`unauthorized`). Sesudah workflow `Image` pertama
+selesai: profil GitHub → **Packages** → `go-portfolio-backend` → **Package
+settings** → **Change visibility** → **Public**. Cukup sekali.
+
+Image publik bisa dibongkar siapa saja, lapis demi lapis, dan tidak bisa
+ditarik kembali. Karena itu workflow menjalankan `tools/periksa-image.sh`
+sebelum menerbitkan: tidak boleh ada `.env`, `.git`, berkas kunci, atau berkas
+unggahan di lapisan mana pun.
 
 ## 4. Mengubah konfigurasi
 
@@ -161,6 +187,7 @@ Mulai selalu dari `sudo ./status.sh` — tiap baris yang tidak hijau membawa sar
 | `API menjawab` mati, kontainer sehat | `ALAMAT_IKAT`/`PORT_API` tidak cocok, atau port dipakai proses lain | periksa `deploy/.env`; `ss -tlnp \| grep <port>` |
 | Login admin selalu kembali ke halaman login | situs dibuka lewat HTTP, cookie `Secure` dibuang | pasang reverse proxy ber-TLS (DEPLOYMENT.md) |
 | Semua pengunjung kena `429` bersamaan | di balik proxy tanpa `TRUSTED_PROXIES` | DEPLOYMENT.md, bagian reverse proxy |
+| Update berhenti: image tidak bisa ditarik | build GitHub belum selesai/gagal, package masih privat, atau GitHub tidak terjangkau | tab **Actions** → workflow `Image`; periksa visibilitas package; atau `--bangun-lokal` |
 | Update berhenti: `checksum mismatch` | `atlas.sum` tidak ikut di-commit | commit `atlas.sum` yang benar, `update.sh` lagi |
 | Disk hampir penuh | image lama, cache build, cadangan | `docker builder prune -f`; `docker system df` |
 
