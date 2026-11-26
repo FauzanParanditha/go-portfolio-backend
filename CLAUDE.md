@@ -145,6 +145,11 @@ Production runs as a Docker image under Docker Compose (`deploy/Dockerfile`, `de
 - `deploy/lib-dasar.sh` is a **verbatim copy** from the project-standard skill — never edit it here; project
   functions go in `deploy/lib.sh`.
 - The runtime image is distroless: no shell. The container healthcheck is the `cmd/healthcheck` binary.
+- Images are built by GitHub Actions (`.github/workflows/image.yml`) on every push to `master`, scanned by
+  `tools/periksa-image.sh` (every layer — the repo and package are public, and a published image cannot be
+  recalled), then pushed to `ghcr.io` tagged with the full commit SHA. `update.sh` pulls the image for the
+  checked-out commit; `--bangun-lokal` builds on the server instead (ADR-016). Never add a `COPY` that could
+  bring `.env`, `uploads/` or `.git` into the image, and keep `.dockerignore` excluding them.
 - A new env key the app needs in production must be added to `deploy/env.example` (`update.sh` copies new
   keys into the server's `deploy/.env`) **and** to the `environment:` list of the `api` service in
   `deploy/docker-compose.yml` — the container only receives keys listed there, not the whole `deploy/.env`
