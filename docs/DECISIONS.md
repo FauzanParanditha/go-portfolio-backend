@@ -225,6 +225,71 @@ Format: `ADR-NNN | Judul | Status | Tanggal`. Status: `Accepted`, `Superseded`, 
 
 ---
 
+## ADR-015 | Produksi berjalan sebagai image Docker di bawah Docker Compose | Accepted | 2026-11
+
+**Konteks.** Deploy sebelumnya berupa langkah manual (`make build`, jalankan
+binary). Tidak ada cara baku untuk memperbarui, mundur, memeriksa keadaan, atau
+mencadangkan data. Server yang dituju satu VM kecil (2 vCPU, ±3 GB RAM), build
+dilakukan di server itu, dan belum ada reverse proxy di depannya.
+
+**Keputusan.**
+- Satu stack Compose per repo (`deploy/docker-compose.yml`): `api` (distroless,
+  non-root, akar hanya-baca), `db` (PostgreSQL, profil `db`, jaringan internal,
+  tidak dipublikasikan), `migrate` (Atlas, sekali jalan).
+- Dikendalikan lewat `install.sh`, `update.sh`, `status.sh`, `backup.sh` di
+  atas `deploy/lib-dasar.sh` (salinan apa adanya dari skill project-standard).
+- Image bertanda versi (`<commit>-<waktu>`); versi sebelumnya disimpan untuk
+  `update.sh --rollback`. Migrasi dijalankan sebelum versi baru dinyalakan.
+- Tidak ada nginx di dalam stack. Port API diikat ke `ALAMAT_IKAT` (bawaan
+  `127.0.0.1`); TLS dan routing adalah urusan reverse proxy di luar stack.
+- Frontend tetap repo terpisah dengan stack-nya sendiri (bukan monorepo).
+
+**Konsekuensi.**
+- Skrip disusun dari aturan skill dan diuji di VM Linux lokal, bukan diturunkan
+  dari repo acuan berbentuk sama. Yang sengaja belum dibuat: `pantau.sh`, skrip
+  firewall, perpanjangan sertifikat, salinan cadangan di luar server.
+- `--rollback` tidak membatalkan migrasi: migrasi harus aditif.
+- Pemilik folder repo di server setara root (cron dan systemd menjalankan skrip
+  dari sana); dianjurkan clone sebagai root di `/opt`.
+- Tanpa TLS, `install.sh` menolak membuka port API ke semua antarmuka kecuali
+  `IZINKAN_HTTP_TERBUKA=ya`.
+- `migrations/atlas.sum` wajib ikut di-commit; kalau tidak, update dibatalkan.
+- Cadangan berada di disk yang sama dengan datanya sampai ada keputusan tempat
+  salinan luar.
+
+---
+
+## ADR-016 | Image dibangun di GitHub Actions, server hanya menarik | Accepted | 2026-11
+
+**Konteks.** ADR-015 membangun image di server. Server itu satu VM kecil
+(2 vCPU, ±3 GB RAM) yang juga menjalankan layanan lain; build frontend
+(Next.js) memakai 1–2 GB memori dan bisa membuat seluruh server macet.
+
+**Keputusan.**
+- Tiap commit di `master` dibangun workflow `Image`, lalu diterbitkan ke
+  `ghcr.io/<pemilik>/<repo>` bertanda **SHA commit lengkap** (tanpa tag
+  mengambang). `update.sh` menarik image untuk commit yang ter-checkout dan
+  memeriksa label `org.opencontainers.image.revision` sebelum memakainya.
+- Sesudah ditarik, image diberi nama lokal `<proyek>/<layanan>:<versi>`, jadi
+  ganti versi, rollback, dan pemangkasan dari ADR-015 tidak berubah.
+- Isi image dipindai (`tools/periksa-image.sh`, semua lapisan) **sebelum**
+  diterbitkan: repo dan package-nya publik.
+- Build lokal tetap ada sebagai jalan cadangan (`--bangun-lokal`,
+  `SUMBER_IMAGE=lokal`). Di frontend ia ditolak bila memori tersedia di bawah
+  2 GB.
+- Deploy tetap manual (`sudo ./update.sh`). GitHub tidak memegang kunci SSH
+  server.
+
+**Konsekuensi.**
+- `NEXT_PUBLIC_*` frontend berasal dari variabel repo di GitHub, bukan dari
+  `deploy/.env` server; `status.sh` melaporkan bila keduanya berbeda.
+- Update harus menunggu workflow selesai; sebelum itu `update.sh` berhenti
+  tanpa menyentuh versi yang berjalan.
+- Hanya ujung tiap push ke `master` yang punya image.
+- Visibilitas package di `ghcr.io` harus diubah ke Public satu kali.
+
+---
+
 ## Template entri baru
 
 ```

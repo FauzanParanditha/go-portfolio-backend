@@ -53,3 +53,11 @@ docs/NOTES-FOR-BACKEND.md
 # dan tidak boleh masuk repo. Di produksi, pasang folder ini sebagai volume
 # persisten — kalau tidak, berkas hilang setiap container dibuat ulang.
 /uploads/
+
+# Keadaan pemasangan di server (ditulis skrip operasional). `.env.*` mencakup
+# salinan deploy/.env.sebelum-rapi-<waktu> yang berisi rahasia.
+.env.*
+!.env.example
+deploy/.versi
+deploy/.cabang
+deploy/docker-compose.override.yml
